@@ -5,7 +5,8 @@
 
 'use strict';
 
-import { Promise, TPromise } from 'vs/base/common/winjs.base';
+import nls = require('vs/nls');
+import { TPromise } from 'vs/base/common/winjs.base';
 import Event from 'vs/base/common/event';
 import { createDecorator, ServiceIdentifier } from 'vs/platform/instantiation/common/instantiation';
 
@@ -13,41 +14,75 @@ export interface IExtensionManifest {
 	name: string;
 	publisher: string;
 	version: string;
+	engines: { vscode: string };
 	displayName?: string;
 	description?: string;
+	main?: string;
 }
 
-export interface IGalleryInformation {
+export interface IGalleryVersion {
+	version: string;
+	date: string;
+	manifestUrl: string;
+	downloadUrl: string;
+	downloadHeaders: { [key: string]: string; };
+}
+
+export interface IGalleryMetadata {
 	galleryApiUrl: string;
 	id: string;
 	publisherId: string;
 	publisherDisplayName: string;
-	date: string;
+	installCount: number;
+	versions: IGalleryVersion[];
 }
 
 export interface IExtension extends IExtensionManifest {
-	galleryInformation?: IGalleryInformation;
+	galleryInformation?: IGalleryMetadata;
 	path?: string;
 }
 
-export var IExtensionsService = createDecorator<IExtensionsService>('extensionsService');
-export var IGalleryService = createDecorator<IGalleryService>('galleryService');
+export const IExtensionsService = createDecorator<IExtensionsService>('extensionsService');
+export const IGalleryService = createDecorator<IGalleryService>('galleryService');
+
+export interface IQueryOptions {
+	text?: string;
+	ids?: string[];
+	pageSize?: number;
+}
+
+export interface IQueryResult {
+	firstPage: IExtension[];
+	total: number;
+	pageSize: number;
+	getPage(pageNumber: number): TPromise<IExtension[]>;
+}
 
 export interface IGalleryService {
 	serviceId: ServiceIdentifier<any>;
 	isEnabled(): boolean;
-	query(): TPromise<IExtension[]>;
+	query(options?: IQueryOptions): TPromise<IQueryResult>;
 }
 
 export interface IExtensionsService {
 	serviceId: ServiceIdentifier<any>;
 	onInstallExtension: Event<IExtensionManifest>;
-	onDidInstallExtension: Event<IExtension>;
+	onDidInstallExtension: Event<{ extension: IExtension; error?: Error; }>;
 	onUninstallExtension: Event<IExtension>;
 	onDidUninstallExtension: Event<IExtension>;
 
 	install(extension: IExtension): TPromise<IExtension>;
 	install(zipPath: string): TPromise<IExtension>;
 	uninstall(extension: IExtension): TPromise<void>;
-	getInstalled(): TPromise<IExtension[]>;
+	getInstalled(includeDuplicateVersions?: boolean): TPromise<IExtension[]>;
 }
+
+export const IExtensionTipsService = createDecorator<IExtensionTipsService>('extensionTipsService');
+
+export interface IExtensionTipsService {
+	serviceId: ServiceIdentifier<IExtensionTipsService>;
+	getRecommendations(): TPromise<IExtension[]>;
+}
+
+export const ExtensionsLabel = nls.localize('extensions', "Extensions");
+export const ExtensionsChannelId = 'extensions';

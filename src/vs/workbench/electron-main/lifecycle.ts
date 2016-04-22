@@ -5,10 +5,8 @@
 
 'use strict';
 
-import app = require('app');
 import events = require('events');
-import ipc = require('ipc');
-import browserwindow = require('browser-window');
+import {ipcMain as ipc, app} from 'electron';
 
 import {TPromise, TValueCallback} from 'vs/base/common/winjs.base';
 import {ReadyState, VSCodeWindow} from 'vs/workbench/electron-main/window';
@@ -67,7 +65,8 @@ export class Lifecycle {
 
 			// Windows/Linux: we quit when all windows have closed
 			// Mac: we only quit when quit was requested
-			if (this.quitRequested || process.platform !== 'darwin') {
+			// --wait: we quit when all windows are closed
+			if (this.quitRequested || process.platform !== 'darwin' || env.cliArgs.waitForWindowClose) {
 				app.quit();
 			}
 		});
@@ -77,7 +76,7 @@ export class Lifecycle {
 
 		// Window Before Closing: Main -> Renderer
 		vscodeWindow.win.on('close', (e) => {
-			let windowId = vscodeWindow.win.id;
+			let windowId = vscodeWindow.id;
 			env.log('Lifecycle#window-before-close', windowId);
 
 			// The window already acknowledged to be closed
@@ -104,12 +103,13 @@ export class Lifecycle {
 	}
 
 	public unload(vscodeWindow: VSCodeWindow): TPromise<boolean /* veto */> {
-		env.log('Lifecycle#unload()', vscodeWindow.win.id);
 
 		// Always allow to unload a window that is not yet ready
 		if (vscodeWindow.readyState !== ReadyState.READY) {
 			return TPromise.as<boolean>(false);
 		}
+		
+		env.log('Lifecycle#unload()', vscodeWindow.id);
 
 		return new TPromise<boolean>((c) => {
 			let oneTimeEventToken = this.oneTimeListenerTokenGenerator++;
@@ -125,14 +125,14 @@ export class Lifecycle {
 				// Any cancellation also cancels a pending quit if present
 				if (this.pendingQuitPromiseComplete) {
 					this.pendingQuitPromiseComplete(true /* veto */);
-					delete this.pendingQuitPromiseComplete;
-					delete this.pendingQuitPromise;
+					this.pendingQuitPromiseComplete = null;
+					this.pendingQuitPromise = null;
 				}
 
 				c(true); // veto
 			});
 
-			vscodeWindow.win.webContents.send('vscode:beforeUnload', { okChannel: oneTimeOkEvent, cancelChannel: oneTimeCancelEvent });
+			vscodeWindow.send('vscode:beforeUnload', { okChannel: oneTimeOkEvent, cancelChannel: oneTimeCancelEvent });
 		});
 	}
 
@@ -152,8 +152,8 @@ export class Lifecycle {
 				app.once('will-quit', () => {
 					if (this.pendingQuitPromiseComplete) {
 						this.pendingQuitPromiseComplete(false /* no veto */);
-						delete this.pendingQuitPromiseComplete;
-						delete this.pendingQuitPromise;
+						this.pendingQuitPromiseComplete = null;
+						this.pendingQuitPromise = null;
 					}
 				});
 

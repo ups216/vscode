@@ -5,11 +5,11 @@
 'use strict';
 
 import nls = require('vs/nls');
-import {Promise} from 'vs/base/common/winjs.base';
+import {TPromise} from 'vs/base/common/winjs.base';
 import {Registry} from 'vs/platform/platform';
 import baseplatform = require('vs/base/common/platform');
 import {IAction, Action} from 'vs/base/common/actions';
-import {IWorkbenchActionRegistry, Extensions as ActionExtensions} from 'vs/workbench/browser/actionRegistry';
+import {IWorkbenchActionRegistry, Extensions as ActionExtensions} from 'vs/workbench/common/actionRegistry';
 import paths = require('vs/base/common/paths');
 import {Scope, IActionBarRegistry, Extensions as ActionBarExtensions, ActionBarContributor} from 'vs/workbench/browser/actionBarRegistry';
 import uri from 'vs/base/common/uri';
@@ -19,6 +19,34 @@ import {ITerminalService} from 'vs/workbench/parts/execution/common/execution';
 import {SyncActionDescriptor} from 'vs/platform/actions/common/actions';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
 import {KeyMod, KeyCode} from 'vs/base/common/keyCodes';
+import {Extensions, IConfigurationRegistry} from 'vs/platform/configuration/common/configurationRegistry';
+import {DEFAULT_WINDOWS_TERM, DEFAULT_LINUX_TERM} from 'vs/workbench/parts/execution/electron-browser/terminal';
+
+let configurationRegistry = <IConfigurationRegistry>Registry.as(Extensions.Configuration);
+configurationRegistry.registerConfiguration({
+	'id': 'terminal',
+	'order': 100,
+	'title': nls.localize('terminalConfigurationTitle', "Terminal configuration"),
+	'type': 'object',
+	'properties': {
+		'terminal.external': {
+			'description': nls.localize('terminal.external', "External terminal settings."),
+			'type': 'object',
+			'properties': {
+				'windowsExec': {
+					'type': 'string',
+					'description': nls.localize('terminal.external.windowsExec', "Customizes which terminal to run on Windows."),
+					'default': DEFAULT_WINDOWS_TERM
+				},
+				'linuxExec': {
+					'type': 'string',
+					'description': nls.localize('terminal.external.linuxExec', "Customizes which terminal to on Linux."),
+					'default': DEFAULT_LINUX_TERM
+				}
+			}
+		}
+	}
+});
 
 export class OpenConsoleAction extends Action {
 
@@ -46,16 +74,16 @@ export class OpenConsoleAction extends Action {
 		this.enabled = !paths.isUNC(this.resource.fsPath);
 	}
 
-	public run(event?: any): Promise {
+	public run(event?: any): TPromise<any> {
 		let workspace = this.contextService.getWorkspace();
 		let path = this.resource ? this.resource.fsPath : (workspace && workspace.resource.fsPath);
 
 		if (!path) {
-			return Promise.as(null);
+			return TPromise.as(null);
 		}
 
 		this.terminalService.openTerminal(path);
-		return Promise.as(null);
+		return TPromise.as(null);
 	}
 }
 
@@ -93,5 +121,6 @@ actionBarRegistry.registerActionBarContributor(Scope.VIEWER, FileViewerActionCon
 		OpenConsoleAction.ID,
 		OpenConsoleAction.Label,
 		{ primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_C }
-	)
+	),
+	'Open New Command Prompt'
 );

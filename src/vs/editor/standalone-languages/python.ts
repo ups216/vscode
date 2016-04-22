@@ -156,7 +156,7 @@ export var language = <ILanguage> {
 	],
 
 	// Cause an automatic indent to occur after lines ending in :.
-	enhancedBrackets: [ { open: /.*:\s*$/,  closeComplete: 'else:' } ],
+	// enhancedBrackets: [ { open: /.*:\s*$/,  closeComplete: 'else:' } ],
 
 	tokenizer: {
 	root: [
@@ -169,7 +169,7 @@ export var language = <ILanguage> {
 
 			[/@[a-zA-Z]\w*/, 'tag'],
 			[/[a-zA-Z]\w*/, { cases: { '@keywords': 'keyword',
-									   '@default': 'identifier' } }]
+										'@default': 'identifier' } }]
 	],
 
 	// Deal with white space, including single and multi-line comments

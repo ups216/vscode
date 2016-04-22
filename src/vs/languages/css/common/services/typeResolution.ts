@@ -4,9 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
+import URI from 'vs/base/common/uri';
 import nodes = require('vs/languages/css/common/parser/cssNodes');
 import service = require('vs/languages/css/common/services/cssLanguageService');
-import network = require('vs/base/common/network');
 import languageFacts = require('vs/languages/css/common/services/languageFacts');
 
 export enum Type {
@@ -54,7 +54,7 @@ export class MultiType implements IType {
 	}
 }
 
-export function typeAtPosition(service:service.ILanguageService, resource:network.URL, offset:number):IType {
+export function typeAtPosition(service:service.ILanguageService, resource:URI, offset:number):IType {
 
 	return null;
 }
@@ -73,7 +73,6 @@ export function typeFromNode(node:nodes.Node):IType {
 		case nodes.NodeType.NumericValue: return typeFromNumeric(<nodes.NumericValue> node);
 		case nodes.NodeType.HexColorValue: return SimpleType.Color;
 		case nodes.NodeType.Identifier: return typeFromLiteral(node);
-		case nodes.NodeType.Function: return typeFromFunction(<nodes.Function> node);
 		case nodes.NodeType.FunctionArgument: return typeFromFunctionArgument(<nodes.FunctionArgument> node);
 	}
 

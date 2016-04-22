@@ -4,11 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import 'vs/languages/css/common/css.contribution';
-import cssMode = require('vs/languages/css/common/css');
-import EditorCommon = require('vs/editor/common/editorCommon');
 import Modes = require('vs/editor/common/modes');
 import modesUtil = require('vs/editor/test/common/modesUtil');
+import {cssTokenTypes, CSSMode} from 'vs/languages/css/common/css';
+import {NULL_THREAD_SERVICE} from 'vs/platform/test/common/nullThreadService';
+import {IThreadService} from 'vs/platform/thread/common/thread';
+import {InstantiationService} from 'vs/platform/instantiation/common/instantiationService';
+import {ServiceCollection} from 'vs/platform/instantiation/common/serviceCollection';
 
 suite('CSS Colorizing', () => {
 
@@ -17,21 +19,28 @@ suite('CSS Colorizing', () => {
 	var tokenizationSupport: Modes.ITokenizationSupport;
 	var assertOnEnter: modesUtil.IOnEnterAsserter;
 
-	suiteSetup((done) => {
-		modesUtil.load('css').then(mode => {
-			tokenizationSupport = mode.tokenizationSupport;
-			assertOnEnter = modesUtil.createOnEnterAsserter(mode.getId(), mode.onEnterSupport);
-			wordDefinition = mode.tokenTypeClassificationSupport.getWordDefinition();
-			done();
-		});
-	});
+	(function() {
+		let threadService = NULL_THREAD_SERVICE;
+		let inst = new InstantiationService(new ServiceCollection([IThreadService, threadService]));
+		threadService.setInstantiationService(inst);
+
+		let mode = new CSSMode(
+			{ id: 'css' },
+			inst,
+			threadService
+		);
+
+		tokenizationSupport = mode.tokenizationSupport;
+		assertOnEnter = modesUtil.createOnEnterAsserter(mode.getId(), mode.richEditSupport);
+		wordDefinition = mode.richEditSupport.wordDefinition;
+	})();
 
 	test('Skip whitespace', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: '      body ',
 			tokens: [
 				{ startIndex:0, type: '' },
-				{ startIndex:6, type: 'entity.name.tag.css' },
+				{ startIndex:6, type: cssTokenTypes.TOKEN_SELECTOR_TAG + '.css' },
 				{ startIndex:10, type: '' }
 			]}
 		]);
@@ -49,70 +58,70 @@ suite('CSS Colorizing', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: 'body {',
 			tokens: [
-				{ startIndex:0, type: 'entity.name.tag.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_SELECTOR_TAG + '.css' },
 				{ startIndex:4, type: '' },
-				{ startIndex:5, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open }
+				{ startIndex:5, type: 'punctuation.bracket.css' }
 			]}, {
 			line: '  margin: 0;',
 			tokens: [
 				{ startIndex:0, type: '' },
-				{ startIndex:2, type: 'support.type.property-name.css' },
+				{ startIndex:2, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:8, type: 'punctuation.css' },
 				{ startIndex:9, type: '' },
-				{ startIndex:10, type: 'meta.property-value.numeric.css' },
+				{ startIndex:10, type: cssTokenTypes.TOKEN_VALUE + '.numeric.css' },
 				{ startIndex:11, type: 'punctuation.css' }
 			]}, {
 			line: '  padding: 3em 6em;',
 			tokens: [
 				{ startIndex:0, type: '' },
-				{ startIndex:2, type: 'support.type.property-name.css' },
+				{ startIndex:2, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:9, type: 'punctuation.css' },
 				{ startIndex:10, type: '' },
-				{ startIndex:11, type: 'meta.property-value.numeric.css' },
-				{ startIndex:12, type: 'meta.property-value.unit.css' },
+				{ startIndex:11, type: cssTokenTypes.TOKEN_VALUE + '.numeric.css' },
+				{ startIndex:12, type: cssTokenTypes.TOKEN_VALUE + '.unit.css' },
 				{ startIndex:14, type: '' },
-				{ startIndex:15, type: 'meta.property-value.numeric.css' },
-				{ startIndex:16, type: 'meta.property-value.unit.css' },
+				{ startIndex:15, type: cssTokenTypes.TOKEN_VALUE + '.numeric.css' },
+				{ startIndex:16, type: cssTokenTypes.TOKEN_VALUE + '.unit.css' },
 				{ startIndex:18, type: 'punctuation.css' }
 			]}, {
 			line: '  font-family: tahoma, arial, sans-serif;',
 			tokens: [
 				{ startIndex:0, type: '' },
-				{ startIndex:2, type: 'support.type.property-name.css' },
+				{ startIndex:2, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:13, type: 'punctuation.css' },
 				{ startIndex:14, type: '' },
-				{ startIndex:15, type: 'meta.property-value.css' },
+				{ startIndex:15, type: cssTokenTypes.TOKEN_VALUE + '.css' },
 				{ startIndex:21, type: 'punctuation.css' },
 				{ startIndex:22, type: '' },
-				{ startIndex:23, type: 'meta.property-value.css' },
+				{ startIndex:23, type: cssTokenTypes.TOKEN_VALUE + '.css' },
 				{ startIndex:28, type: 'punctuation.css' },
 				{ startIndex:29, type: '' },
-				{ startIndex:30, type: 'meta.property-value.css' },
+				{ startIndex:30, type: cssTokenTypes.TOKEN_VALUE + '.css' },
 				{ startIndex:40, type: 'punctuation.css' }
 			]}, {
 			line: '  text-decoration: none !important;',
 			tokens: [
 				{ startIndex:0, type: '' },
-				{ startIndex:2, type: 'support.type.property-name.css' },
+				{ startIndex:2, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:17, type: 'punctuation.css' },
 				{ startIndex:18, type: '' },
-				{ startIndex:19, type: 'meta.property-value.css' },
+				{ startIndex:19, type: cssTokenTypes.TOKEN_VALUE + '.css' },
 				{ startIndex:23, type: '' },
-				{ startIndex:24, type: 'meta.property-value.keyword.css' },
+				{ startIndex:24, type: cssTokenTypes.TOKEN_VALUE + '.keyword.css' },
 				{ startIndex:34, type: 'punctuation.css' }
 			]}, {
 			line: '  color: #000',
 			tokens: [
 				{ startIndex:0, type: '' },
-				{ startIndex:2, type: 'support.type.property-name.css' },
+				{ startIndex:2, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:7, type: 'punctuation.css' },
 				{ startIndex:8, type: '' },
-				{ startIndex:9, type: 'meta.property-value.hex.css' }
+				{ startIndex:9, type: cssTokenTypes.TOKEN_VALUE + '.hex.css' }
 			]}, {
 			line: '  }',
 			tokens: [
 				{ startIndex:0, type: '' },
-				{ startIndex:2, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Close }
+				{ startIndex:2, type: 'punctuation.bracket.css' }
 			]}
 		]);
 	});
@@ -125,17 +134,17 @@ suite('CSS Colorizing', () => {
 				{ startIndex:1, type: '' },
 				{ startIndex:2, type: 'punctuation.bracket.css' },
 				{ startIndex:3, type: '' },
-				{ startIndex:4, type: 'support.type.property-name.css' },
+				{ startIndex:4, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:11, type: 'punctuation.css' },
 				{ startIndex:12, type: '' },
-				{ startIndex:13, type: 'meta.property-value.numeric.css' },
-				{ startIndex:14, type: 'meta.property-value.unit.css' },
+				{ startIndex:13, type: cssTokenTypes.TOKEN_VALUE + '.numeric.css' },
+				{ startIndex:14, type: cssTokenTypes.TOKEN_VALUE + '.unit.css' },
 				{ startIndex:16, type: '' },
-				{ startIndex:17, type: 'meta.property-value.numeric.css' },
-				{ startIndex:19, type: 'meta.property-value.unit.css' },
+				{ startIndex:17, type: cssTokenTypes.TOKEN_VALUE + '.numeric.css' },
+				{ startIndex:19, type: cssTokenTypes.TOKEN_VALUE + '.unit.css' },
 				{ startIndex:21, type: '' },
-				{ startIndex:22, type: 'meta.property-value.numeric.css' },
-				{ startIndex:26, type: 'meta.property-value.unit.css' },
+				{ startIndex:22, type: cssTokenTypes.TOKEN_VALUE + '.numeric.css' },
+				{ startIndex:26, type: cssTokenTypes.TOKEN_VALUE + '.unit.css' },
 				{ startIndex:28, type: 'punctuation.css' },
 				{ startIndex:29, type: '' },
 				{ startIndex:30, type: 'punctuation.bracket.css' }
@@ -151,7 +160,7 @@ suite('CSS Colorizing', () => {
 				{ startIndex:1, type: '' },
 				{ startIndex:2, type: 'punctuation.bracket.css' },
 				{ startIndex:3, type: '' },
-				{ startIndex:4, type: 'support.type.property-name.css' },
+				{ startIndex:4, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:11, type: 'punctuation.css' },
 				{ startIndex:12, type: '' }
 			]}
@@ -162,13 +171,13 @@ suite('CSS Colorizing', () => {
 			modesUtil.assertTokenization(tokenizationSupport, [{
 			line: 'h1 /*comment*/ p {',
 			tokens: [
-				{ startIndex:0, type: 'entity.name.tag.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_SELECTOR_TAG + '.css' },
 				{ startIndex:2, type: '' },
 				{ startIndex:3, type: 'comment.css' },
 				{ startIndex:14, type: '' },
-				{ startIndex:15, type: 'entity.name.tag.css' },
+				{ startIndex:15, type: cssTokenTypes.TOKEN_SELECTOR_TAG + '.css' },
 				{ startIndex:16, type: '' },
-				{ startIndex:17, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open }
+				{ startIndex:17, type: 'punctuation.bracket.css' }
 			]}
 		]);
 	});
@@ -177,7 +186,7 @@ suite('CSS Colorizing', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: 'h1 /*com',
 			tokens: [
-				{ startIndex:0, type: 'entity.name.tag.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_SELECTOR_TAG + '.css' },
 				{ startIndex:2, type: '' },
 				{ startIndex:3, type: 'comment.css' }
 			]}, {
@@ -185,7 +194,7 @@ suite('CSS Colorizing', () => {
 			tokens: [
 				{ startIndex:0, type: 'comment.css' },
 				{ startIndex:6, type: '' },
-				{ startIndex:7, type: 'entity.name.tag.css' }
+				{ startIndex:7, type: cssTokenTypes.TOKEN_SELECTOR_TAG + '.css' }
 			]}
 		]);
 	});
@@ -194,9 +203,9 @@ suite('CSS Colorizing', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: '#myID {',
 			tokens: [
-				{ startIndex:0, type: 'entity.other.attribute-name.id.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_SELECTOR + '.id.css' },
 				{ startIndex:5, type: '' },
-				{ startIndex:6, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open }
+				{ startIndex:6, type: 'punctuation.bracket.css' }
 			]}
 		]);
 	});
@@ -205,9 +214,9 @@ suite('CSS Colorizing', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: '.myID {',
 			tokens: [
-				{ startIndex:0, type: 'entity.other.attribute-name.class.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_SELECTOR + '.class.css' },
 				{ startIndex:5, type: '' },
-				{ startIndex:6, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open }
+				{ startIndex:6, type: 'punctuation.bracket.css' }
 			]}
 		]);
 	});
@@ -216,12 +225,12 @@ suite('CSS Colorizing', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: '@import url("something.css");',
 			tokens: [
-				{ startIndex:0, type: 'keyword.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_AT_KEYWORD + '.css' },
 				{ startIndex:7, type: '' },
-				{ startIndex:8, type: 'meta.property-value.css' },
-				{ startIndex:11, type: 'punctuation.parenthesis.css', bracket: Modes.Bracket.Open },
+				{ startIndex:8, type: cssTokenTypes.TOKEN_VALUE + '.css' },
+				{ startIndex:11, type: 'punctuation.parenthesis.css' },
 				{ startIndex:12, type: 'string.css' },
-				{ startIndex:27, type: 'punctuation.parenthesis.css', bracket: Modes.Bracket.Close },
+				{ startIndex:27, type: 'punctuation.parenthesis.css' },
 				{ startIndex:28, type: 'punctuation.css' }
 			]}
 		]);
@@ -234,7 +243,7 @@ suite('CSS Colorizing', () => {
 			line: '  content: "";',
 			tokens: [
 				{ startIndex:0, type: '' },
-				{ startIndex:2, type: 'support.type.property-name.css' },
+				{ startIndex:2, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:9, type: 'punctuation.css' },
 				{ startIndex:10, type: '' },
 				{ startIndex:11, type: 'string.css' },
@@ -247,14 +256,14 @@ suite('CSS Colorizing', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: '@font-face {',
 			tokens: [
-				{ startIndex:0, type: 'keyword.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_AT_KEYWORD + '.css' },
 				{ startIndex:10, type: '' },
-				{ startIndex:11, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open }
+				{ startIndex:11, type: 'punctuation.bracket.css' }
 			]}, {
 			line: '  font-family: "Opificio";',
 			tokens: [
 				{ startIndex:0, type: '' },
-				{ startIndex:2, type: 'support.type.property-name.css' },
+				{ startIndex:2, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:13, type: 'punctuation.css' },
 				{ startIndex:14, type: '' },
 				{ startIndex:15, type: 'string.css' },
@@ -277,29 +286,29 @@ suite('CSS Colorizing', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: '@-webkit-keyframes infinite-spinning {',
 			tokens: [
-				{ startIndex:0, type: 'keyword.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_AT_KEYWORD + '.css' },
 				{ startIndex:18, type: '' },
-				{ startIndex:19, type: 'meta.property-value.css' },
+				{ startIndex:19, type: cssTokenTypes.TOKEN_VALUE + '.css' },
 				{ startIndex:36, type: '' },
-				{ startIndex:37, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open }
+				{ startIndex:37, type: 'punctuation.bracket.css' }
 			]}, {
 			line: '  from {',
 			tokens: [
 				{ startIndex:0, type: '' },
-				{ startIndex:2, type: 'entity.name.tag.css' },
+				{ startIndex:2, type: cssTokenTypes.TOKEN_SELECTOR_TAG + '.css' },
 				{ startIndex:6, type: '' },
 				{ startIndex:7, type: 'punctuation.bracket.css' }
 			]}, {
 			line: '  -webkit-transform: rotate(0deg);',
 			tokens: [
 				{ startIndex:0, type: '' },
-				{ startIndex:2, type: 'support.type.property-name.css' },
+				{ startIndex:2, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:19, type: 'punctuation.css' },
 				{ startIndex:20, type: '' },
-				{ startIndex:21, type: 'meta.property-value.css' },
+				{ startIndex:21, type: cssTokenTypes.TOKEN_VALUE + '.css' },
 				{ startIndex:27, type: 'punctuation.parenthesis.css' },
-				{ startIndex:28, type: 'meta.property-value.numeric.css' },
-				{ startIndex:29, type: 'meta.property-value.unit.css' },
+				{ startIndex:28, type: cssTokenTypes.TOKEN_VALUE + '.numeric.css' },
+				{ startIndex:29, type: cssTokenTypes.TOKEN_VALUE + '.unit.css' },
 				{ startIndex:32, type: 'punctuation.parenthesis.css' },
 				{ startIndex:33, type: 'punctuation.css' }
 			]}, {
@@ -311,20 +320,20 @@ suite('CSS Colorizing', () => {
 			line: '  to {',
 			tokens: [
 				{ startIndex:0, type: '' },
-				{ startIndex:2, type: 'entity.name.tag.css' },
+				{ startIndex:2, type: cssTokenTypes.TOKEN_SELECTOR_TAG + '.css' },
 				{ startIndex:4, type: '' },
 				{ startIndex:5, type: 'punctuation.bracket.css' }
 			]}, {
 			line: '  -webkit-transform: rotate(360deg);',
 			tokens: [
 				{ startIndex:0, type: '' },
-				{ startIndex:2, type: 'support.type.property-name.css' },
+				{ startIndex:2, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:19, type: 'punctuation.css' },
 				{ startIndex:20, type: '' },
-				{ startIndex:21, type: 'meta.property-value.css' },
+				{ startIndex:21, type: cssTokenTypes.TOKEN_VALUE + '.css' },
 				{ startIndex:27, type: 'punctuation.parenthesis.css' },
-				{ startIndex:28, type: 'meta.property-value.numeric.css' },
-				{ startIndex:31, type: 'meta.property-value.unit.css' },
+				{ startIndex:28, type: cssTokenTypes.TOKEN_VALUE + '.numeric.css' },
+				{ startIndex:31, type: cssTokenTypes.TOKEN_VALUE + '.unit.css' },
 				{ startIndex:34, type: 'punctuation.parenthesis.css' },
 				{ startIndex:35, type: 'punctuation.css' }
 			]}, {
@@ -344,25 +353,23 @@ suite('CSS Colorizing', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: '@import url("something.css");',
 			tokens: [
-				{ startIndex:0, type: 'keyword.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_AT_KEYWORD + '.css' },
 				{ startIndex:7, type: '' },
-				{ startIndex:8, type: 'meta.property-value.css' },
-				{ startIndex:11, type: 'punctuation.parenthesis.css', bracket: Modes.Bracket.Open },
+				{ startIndex:8, type: cssTokenTypes.TOKEN_VALUE + '.css' },
+				{ startIndex:11, type: 'punctuation.parenthesis.css' },
 				{ startIndex:12, type: 'string.css' },
-				{ startIndex:27, type: 'punctuation.parenthesis.css', bracket: Modes.Bracket.Close },
+				{ startIndex:27, type: 'punctuation.parenthesis.css' },
 				{ startIndex:28, type: 'punctuation.css' }
 			]}, {
 			line: '.rule1{}',
 			tokens: [
-				{ startIndex:0, type: 'entity.other.attribute-name.class.css' },
-				{ startIndex:6, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open },
-				{ startIndex:7, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Close }
+				{ startIndex:0, type: cssTokenTypes.TOKEN_SELECTOR + '.class.css' },
+				{ startIndex:6, type: 'punctuation.bracket.css' }
 			]}, {
 			line: '.rule2{}',
 			tokens: [
-				{ startIndex:0, type: 'entity.other.attribute-name.class.css' },
-				{ startIndex:6, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open },
-				{ startIndex:7, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Close }
+				{ startIndex:0, type: cssTokenTypes.TOKEN_SELECTOR + '.class.css' },
+				{ startIndex:6, type: 'punctuation.bracket.css' }
 			]}
 		]);
 	});
@@ -393,19 +400,19 @@ suite('CSS Colorizing', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: '@import url("something.css");@import url("something.css");',
 			tokens: [
-				{ startIndex:0, type: 'keyword.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_AT_KEYWORD + '.css' },
 				{ startIndex:7, type: '' },
-				{ startIndex:8, type: 'meta.property-value.css' },
-				{ startIndex:11, type: 'punctuation.parenthesis.css', bracket: Modes.Bracket.Open },
+				{ startIndex:8, type: cssTokenTypes.TOKEN_VALUE + '.css' },
+				{ startIndex:11, type: 'punctuation.parenthesis.css' },
 				{ startIndex:12, type: 'string.css' },
-				{ startIndex:27, type: 'punctuation.parenthesis.css', bracket: Modes.Bracket.Close },
+				{ startIndex:27, type: 'punctuation.parenthesis.css' },
 				{ startIndex:28, type: 'punctuation.css' },
-				{ startIndex:29, type: 'keyword.css' },
+				{ startIndex:29, type: cssTokenTypes.TOKEN_AT_KEYWORD + '.css' },
 				{ startIndex:36, type: '' },
-				{ startIndex:37, type: 'meta.property-value.css' },
-				{ startIndex:40, type: 'punctuation.parenthesis.css', bracket: Modes.Bracket.Open },
+				{ startIndex:37, type: cssTokenTypes.TOKEN_VALUE + '.css' },
+				{ startIndex:40, type: 'punctuation.parenthesis.css' },
 				{ startIndex:41, type: 'string.css' },
-				{ startIndex:56, type: 'punctuation.parenthesis.css', bracket: Modes.Bracket.Close },
+				{ startIndex:56, type: 'punctuation.parenthesis.css' },
 				{ startIndex:57, type: 'punctuation.css' }
 			]}
 		]);
@@ -416,29 +423,29 @@ suite('CSS Colorizing', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: '.a{background:#f5f9fc !important}.b{font-family:"Helvetica Neue", Helvetica;height:31px;}',
 			tokens: [
-				{ startIndex:0, type: 'entity.other.attribute-name.class.css' },
-				{ startIndex:2, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open },
-				{ startIndex:3, type: 'support.type.property-name.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_SELECTOR + '.class.css' },
+				{ startIndex:2, type: 'punctuation.bracket.css' },
+				{ startIndex:3, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:13, type: 'punctuation.css' },
-				{ startIndex:14, type: 'meta.property-value.hex.css' },
+				{ startIndex:14, type: cssTokenTypes.TOKEN_VALUE + '.hex.css' },
 				{ startIndex:21, type: '' },
-				{ startIndex:22, type: 'meta.property-value.keyword.css' },
-				{ startIndex:32, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Close },
-				{ startIndex:33, type: 'entity.other.attribute-name.class.css' },
-				{ startIndex:35, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open },
-				{ startIndex:36, type: 'support.type.property-name.css' },
+				{ startIndex:22, type: cssTokenTypes.TOKEN_VALUE + '.keyword.css' },
+				{ startIndex:32, type: 'punctuation.bracket.css' },
+				{ startIndex:33, type: cssTokenTypes.TOKEN_SELECTOR + '.class.css' },
+				{ startIndex:35, type: 'punctuation.bracket.css' },
+				{ startIndex:36, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:47, type: 'punctuation.css' },
 				{ startIndex:48, type: 'string.css' },
 				{ startIndex:64, type: 'punctuation.css' },
 				{ startIndex:65, type: '' },
-				{ startIndex:66, type: 'meta.property-value.css' },
+				{ startIndex:66, type: cssTokenTypes.TOKEN_VALUE + '.css' },
 				{ startIndex:75, type: 'punctuation.css' },
-				{ startIndex:76, type: 'support.type.property-name.css' },
+				{ startIndex:76, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:82, type: 'punctuation.css' },
-				{ startIndex:83, type: 'meta.property-value.numeric.css' },
-				{ startIndex:85, type: 'meta.property-value.unit.css' },
+				{ startIndex:83, type: cssTokenTypes.TOKEN_VALUE + '.numeric.css' },
+				{ startIndex:85, type: cssTokenTypes.TOKEN_VALUE + '.unit.css' },
 				{ startIndex:87, type: 'punctuation.css' },
-				{ startIndex:88, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Close }
+				{ startIndex:88, type: 'punctuation.bracket.css' }
 			]}
 		]);
 	});
@@ -448,24 +455,24 @@ suite('CSS Colorizing', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: '.even { background: #fff url(data:image/gif;base64,R0lGODlhBgASALMAAOfn5+rq6uvr6+zs7O7u7vHx8fPz8/b29vj4+P39/f///wAAAAAAAAAAAAAAAAAAACwAAAAABgASAAAIMAAVCBxIsKDBgwgTDkzAsKGAhxARSJx4oKJFAxgzFtjIkYDHjwNCigxAsiSAkygDAgA7) repeat-x bottom}',
 			tokens: [
-				{ startIndex:0, type: 'entity.other.attribute-name.class.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_SELECTOR + '.class.css' },
 				{ startIndex:5, type: '' },
-				{ startIndex:6, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open },
+				{ startIndex:6, type: 'punctuation.bracket.css' },
 				{ startIndex:7, type: '' },
-				{ startIndex:8, type: 'support.type.property-name.css' },
+				{ startIndex:8, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:18, type: 'punctuation.css' },
 				{ startIndex:19, type: '' },
-				{ startIndex:20, type: 'meta.property-value.hex.css' },
+				{ startIndex:20, type: cssTokenTypes.TOKEN_VALUE + '.hex.css' },
 				{ startIndex:24, type: '' },
-				{ startIndex:25, type: 'meta.property-value.css' },
-				{ startIndex:28, type: 'punctuation.parenthesis.css', bracket: Modes.Bracket.Open },
+				{ startIndex:25, type: cssTokenTypes.TOKEN_VALUE + '.css' },
+				{ startIndex:28, type: 'punctuation.parenthesis.css' },
 				{ startIndex:29, type: 'string.css' },
-				{ startIndex:215, type: 'punctuation.parenthesis.css', bracket: Modes.Bracket.Close },
+				{ startIndex:215, type: 'punctuation.parenthesis.css' },
 				{ startIndex:216, type: '' },
-				{ startIndex:217, type: 'meta.property-value.css' },
+				{ startIndex:217, type: cssTokenTypes.TOKEN_VALUE + '.css' },
 				{ startIndex:225, type: '' },
-				{ startIndex:226, type: 'meta.property-value.css' },
-				{ startIndex:232, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Close }
+				{ startIndex:226, type: cssTokenTypes.TOKEN_VALUE + '.css' },
+				{ startIndex:232, type: 'punctuation.bracket.css' }
 			]}
 		]);
 	});
@@ -475,40 +482,37 @@ suite('CSS Colorizing', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: '.a{background:url(/a.jpg)}',
 			tokens: [
-				{ startIndex:0, type: 'entity.other.attribute-name.class.css' },
-				{ startIndex:2, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open },
-				{ startIndex:3, type: 'support.type.property-name.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_SELECTOR + '.class.css' },
+				{ startIndex:2, type: 'punctuation.bracket.css' },
+				{ startIndex:3, type: cssTokenTypes.TOKEN_PROPERTY + '.css' },
 				{ startIndex:13, type: 'punctuation.css' },
-				{ startIndex:14, type: 'meta.property-value.css' },
-				{ startIndex:17, type: 'punctuation.parenthesis.css', bracket: Modes.Bracket.Open },
+				{ startIndex:14, type: cssTokenTypes.TOKEN_VALUE + '.css' },
+				{ startIndex:17, type: 'punctuation.parenthesis.css' },
 				{ startIndex:18, type: 'string.css' },
-				{ startIndex:24, type: 'punctuation.parenthesis.css', bracket: Modes.Bracket.Close },
-				{ startIndex:25, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Close }
+				{ startIndex:24, type: 'punctuation.parenthesis.css' },
+				{ startIndex:25, type: 'punctuation.bracket.css' }
 			]}
 		]);
 	});
 
-	test('Bracket Matching', () => {
+	test('bracket Matching', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: 'p{}',
 			tokens: [
-				{ startIndex:0, type: 'entity.name.tag.css' },
-				{ startIndex:1, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open },
-				{ startIndex:2, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Close }
+				{ startIndex:0, type: cssTokenTypes.TOKEN_SELECTOR_TAG + '.css' },
+				{ startIndex:1, type: 'punctuation.bracket.css' }
 			]}
 		]);
 	});
 
-	test('Bracket Matching #2', () => {
+	test('bracket Matching #2', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: 'p:nth() {}',
 			tokens: [
-				{ startIndex:0, type: 'entity.name.tag.css' },
-				{ startIndex:5, type: 'punctuation.parenthesis.css', bracket: Modes.Bracket.Open },
-				{ startIndex:6, type: 'punctuation.parenthesis.css', bracket: Modes.Bracket.Close },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_SELECTOR_TAG + '.css' },
+				{ startIndex:5, type: 'punctuation.parenthesis.css' },
 				{ startIndex:7, type: '' },
-				{ startIndex:8, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open },
-				{ startIndex:9, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Close }
+				{ startIndex:8, type: 'punctuation.bracket.css' }
 			]}
 		]);
 	});
@@ -538,12 +542,12 @@ suite('CSS Colorizing', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: 'input[type= \\"submit\\"',
 			tokens: [
-				{ startIndex:0, type: 'entity.name.tag.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_SELECTOR_TAG + '.css' },
 				{ startIndex:5, type: 'punctuation.css'},
-				{ startIndex:6, type: 'entity.name.tag.css' },
+				{ startIndex:6, type: cssTokenTypes.TOKEN_SELECTOR_TAG + '.css' },
 				{ startIndex:10, type: 'punctuation.css'},
 				{ startIndex:11, type: ''},
-				{ startIndex:12, type: 'entity.name.tag.css'}
+				{ startIndex:12, type: cssTokenTypes.TOKEN_SELECTOR_TAG + '.css'}
 			]}
 		]);
 	});
@@ -552,10 +556,10 @@ suite('CSS Colorizing', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: '.rule {\\',
 			tokens: [
-				{ startIndex:0, type: 'entity.other.attribute-name.class.css' },
+				{ startIndex:0, type: cssTokenTypes.TOKEN_SELECTOR + '.class.css' },
 				{ startIndex:5, type: ''},
-				{ startIndex:6, type: 'punctuation.bracket.css', bracket: Modes.Bracket.Open },
-				{ startIndex:7, type: 'support.type.property-name.css'}
+				{ startIndex:6, type: 'punctuation.bracket.css' },
+				{ startIndex:7, type: cssTokenTypes.TOKEN_PROPERTY + '.css'}
 			]}
 		]);
 	});

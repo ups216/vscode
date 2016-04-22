@@ -6,23 +6,25 @@
 'use strict';
 
 import * as assert from 'assert';
-import {TestKeybindingService, TestContextService, TestStorageService, TestEventService, TestEditorService, TestQuickOpenService} from 'vs/workbench/test/browser/servicesTestUtils';
+import {TestContextService, TestStorageService, TestEventService, TestEditorService, TestQuickOpenService} from 'vs/workbench/test/browser/servicesTestUtils';
+import {MockKeybindingService} from 'vs/platform/keybinding/test/common/mockKeybindingService';
 import {Registry} from 'vs/platform/platform';
 import {EditorHistoryModel, EditorHistoryEntry} from 'vs/workbench/browser/parts/quickopen/editorHistoryModel';
 import {QuickOpenHandlerDescriptor, IQuickOpenRegistry, Extensions as QuickOpenExtensions} from 'vs/workbench/browser/quickopen';
 import {QuickOpenController} from 'vs/workbench/browser/parts/quickopen/quickOpenController';
-import {Mode} from 'vs/base/parts/quickopen/browser/quickOpen';
+import {Mode} from 'vs/base/parts/quickopen/common/quickOpen';
 import {QuickOpenAction} from 'vs/workbench/browser/actions/quickOpenAction';
-import {StringEditorInput} from 'vs/workbench/browser/parts/editor/stringEditorInput';
+import {StringEditorInput} from 'vs/workbench/common/editor/stringEditorInput';
 import {EditorInput} from 'vs/workbench/common/editor';
 import {isEmptyObject} from 'vs/base/common/types';
 import {join} from 'vs/base/common/paths';
-import {BaseEditor, EditorInputAction, EditorInputActionContributor, EditorDescriptor, Extensions, IEditorRegistry, IEditorInputFactory} from 'vs/workbench/browser/parts/editor/baseEditor';
+import {Extensions, IEditorRegistry} from 'vs/workbench/browser/parts/editor/baseEditor';
 import URI from 'vs/base/common/uri';
-import {create} from 'vs/platform/instantiation/common/instantiationService';
-import {EventType, EditorEvent} from 'vs/workbench/browser/events';
-import {Promise, TPromise} from 'vs/base/common/winjs.base';
-import {IEditorInput, IEditorModel, IEditorOptions, ITextInput, Position, IEditor, IResourceInput, ITextEditorModel} from 'vs/platform/editor/common/editor';
+import {ServiceCollection} from 'vs/platform/instantiation/common/serviceCollection';
+import {InstantiationService} from 'vs/platform/instantiation/common/instantiationService';
+import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
+import {EventType, EditorEvent} from 'vs/workbench/common/events';
+import {Position} from 'vs/platform/editor/common/editor';
 
 function toResource(path) {
 	return URI.file(join('C:\\', path));
@@ -38,12 +40,12 @@ suite('Workbench QuickOpen', () => {
 	test('EditorHistoryEntry', () => {
 		let editorService = new TestEditorService();
 		let contextService = new TestContextService();
-		let inst = create({});
+		let inst = new InstantiationService();
 
 		let model = new EditorHistoryModel(editorService, null, contextService);
 
-		let input1 = inst.createInstance(StringEditorInput, "name1", 'description', "value1", "text/plain", false);
-		let entry1 = new EditorHistoryEntry(editorService, contextService, input1, null, model);
+		let input1 = inst.createInstance(StringEditorInput, 'name1', 'description', 'value1', 'text/plain', false);
+		let entry1 = new EditorHistoryEntry(editorService, contextService, input1, null, null, model);
 
 		assert.equal(input1.getName(), entry1.getLabel());
 		assert.equal(input1.getDescription(), entry1.getDescription());
@@ -61,10 +63,10 @@ suite('Workbench QuickOpen', () => {
 		assert(clone1.getInput() === input1);
 		assert.equal(1, clone1.getHighlights()[0].length);
 
-		let input2 = inst.createInstance(StringEditorInput, "name2", 'description', "value2", "text/plain", false);
-		(<any>input2).getResource = () => "path";
-		let entry2 = new EditorHistoryEntry(editorService, contextService, input2, null, model);
-		assert.equal(entry2.getResource(), "path");
+		let input2 = inst.createInstance(StringEditorInput, 'name2', 'description', 'value2', 'text/plain', false);
+		(<any>input2).getResource = () => 'path';
+		let entry2 = new EditorHistoryEntry(editorService, contextService, input2, null, null, model);
+		assert.ok(!entry2.getResource()); // inputs with getResource are not taken as resource for entry, only files and untitled
 
 		assert(!entry1.matches(entry2.getInput()));
 		assert(entry1.matches(entry1.getInput()));
@@ -76,11 +78,11 @@ suite('Workbench QuickOpen', () => {
 	test('EditorHistoryEntry is removed when open fails', () => {
 		let editorService = new TestEditorService();
 		let contextService = new TestContextService();
-		let inst = create({});
+		let inst = new InstantiationService();
 
 		let model = new EditorHistoryModel(editorService, null, contextService);
 
-		let input1 = inst.createInstance(StringEditorInput, "name1", 'description', "value1", "text/plain", false);
+		let input1 = inst.createInstance(StringEditorInput, 'name1', 'description', 'value1', 'text/plain', false);
 
 		model.add(input1);
 
@@ -92,18 +94,18 @@ suite('Workbench QuickOpen', () => {
 	});
 
 	test('EditorHistoryModel', () => {
-		Registry.as('workbench.contributions.editors').setInstantiationService(create({}));
+		Registry.as('workbench.contributions.editors').setInstantiationService(new InstantiationService());
 
 		let editorService = new TestEditorService();
 		let contextService = new TestContextService();
 
-		let inst = create({ editorService: editorService });
+		let inst = new InstantiationService(new ServiceCollection([IWorkbenchEditorService, editorService]));
 
 		let model = new EditorHistoryModel(editorService, inst, contextService);
 
-		let input1 = inst.createInstance(StringEditorInput, "name1", 'description', "value1", "text/plain", false);
-		let input2 = inst.createInstance(StringEditorInput, "name2", 'description', "value2", "text/plain", false);
-		let input3 = inst.createInstance(StringEditorInput, "name3", 'description', "value3", "text/plain", false);
+		let input1 = inst.createInstance(StringEditorInput, 'name1', 'description', 'value1', 'text/plain', false);
+		let input2 = inst.createInstance(StringEditorInput, 'name2', 'description', 'value2', 'text/plain', false);
+		let input3 = inst.createInstance(StringEditorInput, 'name3', 'description', 'value3', 'text/plain', false);
 
 		assert.equal(0, model.getEntries().length);
 
@@ -125,8 +127,8 @@ suite('Workbench QuickOpen', () => {
 		model.saveTo(memento);
 		assert(isEmptyObject(memento));
 
-		let saveInput1 = <EditorInput>inst.createInstance(fileInputCtor, toResource("path1"), "text/plain", void 0);
-		let saveInput2 = <EditorInput>inst.createInstance(fileInputCtor, toResource("path2"), "text/plain", void 0);
+		let saveInput1 = <EditorInput>inst.createInstance(fileInputCtor, toResource('path1'), 'text/plain', void 0);
+		let saveInput2 = <EditorInput>inst.createInstance(fileInputCtor, toResource('path2'), 'text/plain', void 0);
 
 		model.add(saveInput1);
 		model.add(saveInput2);
@@ -143,35 +145,35 @@ suite('Workbench QuickOpen', () => {
 
 		model = new EditorHistoryModel(editorService, inst, contextService);
 
-		let cinput1 = <EditorInput>inst.createInstance(fileInputCtor, toResource("Hello World"), "text/plain", void 0);
-		let cinput2 = <EditorInput>inst.createInstance(fileInputCtor, toResource("Yes World"), "text/plain", void 0);
-		let cinput3 = <EditorInput>inst.createInstance(fileInputCtor, toResource("No Hello"), "text/plain", void 0);
+		let cinput1 = <EditorInput>inst.createInstance(fileInputCtor, toResource('Hello World'), 'text/plain', void 0);
+		let cinput2 = <EditorInput>inst.createInstance(fileInputCtor, toResource('Yes World'), 'text/plain', void 0);
+		let cinput3 = <EditorInput>inst.createInstance(fileInputCtor, toResource('No Hello'), 'text/plain', void 0);
 
 		model.add(cinput1);
 		model.add(cinput2);
 		model.add(cinput3);
 
-		assert.equal(3, model.getResults("*").length);
-		assert.equal(1, model.getResults("HW").length);
-		assert.equal(2, model.getResults("World").length);
+		assert.equal(3, model.getResults('*').length);
+		assert.equal(1, model.getResults('HW').length);
+		assert.equal(2, model.getResults('World').length);
 
-		assert.equal(1, model.getResults("*")[0].getHighlights()[0].length);
+		assert.equal(1, model.getResults('*')[0].getHighlights()[0].length);
 
 		model = new EditorHistoryModel(editorService, inst, contextService);
 
-		let cinput4 = <EditorInput>inst.createInstance(fileInputCtor, toResource("foo.ts"), "text/plain", void 0);
-		let cinput5 = <EditorInput>inst.createInstance(fileInputCtor, toResource("bar.js"), "text/plain", void 0);
-		let cinput6 = <EditorInput>inst.createInstance(fileInputCtor, toResource("foo.js"), "text/plain", void 0);
+		let cinput4 = <EditorInput>inst.createInstance(fileInputCtor, toResource('foo.ts'), 'text/plain', void 0);
+		let cinput5 = <EditorInput>inst.createInstance(fileInputCtor, toResource('bar.js'), 'text/plain', void 0);
+		let cinput6 = <EditorInput>inst.createInstance(fileInputCtor, toResource('foo.js'), 'text/plain', void 0);
 
 		model.add(cinput4);
 		model.add(cinput5);
 		model.add(cinput6);
 
-		let sortedResults = model.getResults("*");
-		assert.equal(3, model.getResults("*").length);
-		assert.equal("c:/bar.js", sortedResults[0].getResource().fsPath.replace(/\\/g, '/'));
-		assert.equal("c:/foo.js", sortedResults[1].getResource().fsPath.replace(/\\/g, '/'));
-		assert.equal("c:/foo.ts", sortedResults[2].getResource().fsPath.replace(/\\/g, '/'));
+		let sortedResults = model.getResults('*');
+		assert.equal(3, model.getResults('*').length);
+		assert.equal('c:/bar.js', sortedResults[0].getResource().fsPath.replace(/\\/g, '/'));
+		assert.equal('c:/foo.js', sortedResults[1].getResource().fsPath.replace(/\\/g, '/'));
+		assert.equal('c:/foo.ts', sortedResults[2].getResource().fsPath.replace(/\\/g, '/'));
 	});
 
 	test('QuickOpen Handler and Registry', () => {
@@ -179,21 +181,21 @@ suite('Workbench QuickOpen', () => {
 		let handler = new QuickOpenHandlerDescriptor(
 			'test',
 			'TestHandler',
-			",",
-			"Handler"
+			',',
+			'Handler'
 		);
 
 		registry.registerQuickOpenHandler(handler);
 
-		assert(registry.getQuickOpenHandler(",") === handler);
+		assert(registry.getQuickOpenHandler(',') === handler);
 
 		let handlers = registry.getQuickOpenHandlers();
-		assert(handlers.some((handler: QuickOpenHandlerDescriptor) => handler.prefix === ","));
+		assert(handlers.some((handler: QuickOpenHandlerDescriptor) => handler.prefix === ','));
 	});
 
 	test('QuickOpen Action', () => {
-		let defaultAction = new QuickOpenAction("id", "label", void 0, new TestQuickOpenService((prefix: string) => assert(!prefix)));
-		let prefixAction = new QuickOpenAction("id", "label", ",", new TestQuickOpenService((prefix: string) => assert(!!prefix)));
+		let defaultAction = new QuickOpenAction('id', 'label', void 0, new TestQuickOpenService((prefix: string) => assert(!prefix)));
+		let prefixAction = new QuickOpenAction('id', 'label', ',', new TestQuickOpenService((prefix: string) => assert(!!prefix)));
 
 		defaultAction.run();
 		prefixAction.run();
@@ -206,7 +208,7 @@ suite('Workbench QuickOpen', () => {
 		let storageService = new TestStorageService();
 		let contextService = new TestContextService();
 
-		let inst = create({ editorService: editorService });
+		let inst = new InstantiationService(new ServiceCollection([IWorkbenchEditorService, editorService]));
 
 		let controller = new QuickOpenController(
 			eventService,
@@ -216,15 +218,16 @@ suite('Workbench QuickOpen', () => {
 			null,
 			null,
 			contextService,
-			new TestKeybindingService()
+			new MockKeybindingService(),
+			null
 		);
 
 		controller.create();
 
 		assert.equal(0, controller.getEditorHistoryModel().getEntries().length);
 
-		let cinput1 = <EditorInput>inst.createInstance(fileInputCtor, toResource("Hello World"), "text/plain", void 0);
-		let event = new EditorEvent(null, "", cinput1, null, Position.LEFT);
+		let cinput1 = <EditorInput>inst.createInstance(fileInputCtor, toResource('Hello World'), 'text/plain', void 0);
+		let event = new EditorEvent(null, '', cinput1, null, Position.LEFT);
 		eventService.emit(EventType.EDITOR_INPUT_CHANGING, event);
 
 		assert.equal(1, controller.getEditorHistoryModel().getEntries().length);

@@ -5,7 +5,6 @@
 'use strict';
 
 import languageFacts = require('vs/languages/css/common/services/languageFacts');
-import EditorCommon = require('vs/editor/common/editorCommon');
 import Modes = require('vs/editor/common/modes');
 import cssIntellisense = require('vs/languages/css/common/services/intelliSense');
 import nls = require('vs/nls');
@@ -148,9 +147,9 @@ export class SASSIntellisense extends cssIntellisense.CSSIntellisense {
 		return super.getColorProposals(entry, result);
 	}
 
-	public getCompletionsForDeclarations(declarations: nodes.Declarations, result: Modes.ISuggestion[]): Modes.ISuggestion[]{
+	public getCompletionsForDeclarationProperty(result: Modes.ISuggestion[]): Modes.ISuggestion[]{
 		this.getCompletionsForSelector(null, result);
-		return super.getCompletionsForDeclarations(declarations, result);
+		return super.getCompletionsForDeclarationProperty(result);
 	}
 
 }

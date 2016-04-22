@@ -21,14 +21,14 @@ import {Sash, ISashEvent, IVerticalSashLayoutProvider} from 'vs/base/browser/ui/
 import {ProgressBar} from 'vs/base/browser/ui/progressbar/progressbar';
 import {BaseEditor} from 'vs/workbench/browser/parts/editor/baseEditor';
 import {EditorInput, IInputStatus, TextEditorOptions} from 'vs/workbench/common/editor';
-import {DiffEditorInput} from 'vs/workbench/browser/parts/editor/diffEditorInput';
+import {DiffEditorInput} from 'vs/workbench/common/editor/diffEditorInput';
 import {EventType as BaseEventType} from 'vs/base/common/events';
-import {EditorInputEvent, EventType as WorkbenchEventType} from 'vs/workbench/browser/events';
+import {EditorInputEvent, EventType as WorkbenchEventType} from 'vs/workbench/common/events';
 import DOM = require('vs/base/browser/dom');
 import {IActionItem, ActionsOrientation} from 'vs/base/browser/ui/actionbar/actionbar';
 import {ToolBar} from 'vs/base/browser/ui/toolbar/toolbar';
 import {IWorkbenchEditorService, EditorArrangement} from 'vs/workbench/services/editor/common/editorService';
-import {IQuickOpenService} from 'vs/workbench/services/quickopen/browser/quickOpenService';
+import {IQuickOpenService} from 'vs/workbench/services/quickopen/common/quickOpenService';
 import {IWorkspaceContextService} from 'vs/workbench/services/workspace/common/contextService';
 import {IContextViewService, IContextMenuService} from 'vs/platform/contextview/browser/contextView';
 import {Position, POSITIONS} from 'vs/platform/editor/common/editor';
@@ -71,8 +71,6 @@ export class SideBySideEditorControl extends EventEmitter implements IVerticalSa
 	private editorActionsToolbar: ToolBar[];
 	private closeEditorAction: Action[];
 
-	private editorInputStateHoverTimeout: number;
-
 	private splitEditorAction: Action;
 
 	private leftSash: Sash;
@@ -88,7 +86,6 @@ export class SideBySideEditorControl extends EventEmitter implements IVerticalSa
 	private lastActivePosition: Position;
 
 	private visibleEditorFocusTrackers: DOM.IFocusTracker[];
-	private globalFocusTracker: DOM.IFocusTracker;
 	private editorInputStateChangeListener: () => void;
 
 	constructor(
@@ -303,23 +300,6 @@ export class SideBySideEditorControl extends EventEmitter implements IVerticalSa
 	}
 
 	private trackFocus(editor: BaseEditor, position: Position): void {
-
-		// Global focus tracker to support focus changes into iframes
-		if (!this.globalFocusTracker) {
-			this.globalFocusTracker = DOM.trackFocus(window.document.body);
-			this.globalFocusTracker.addBlurListener(() => {
-				let activeElement = window.document.activeElement;
-				if (activeElement) {
-					for (let i = 0; i < this.visibleEditorContainers.length; i++) {
-						let container = this.visibleEditorContainers[i];
-						if (container && DOM.isAncestor(activeElement, container.getHTMLElement())) {
-							this.onFocusGained(this.visibleEditors[i]);
-							break;
-						}
-					}
-				}
-			});
-		}
 
 		// In case there is a previous tracker on the position, dispose it first
 		if (this.visibleEditorFocusTrackers[position]) {
@@ -741,31 +721,33 @@ export class SideBySideEditorControl extends EventEmitter implements IVerticalSa
 	private create(parent: Builder): void {
 
 		// Left Container
-		this.containers[Position.LEFT] = $(parent).div({ class: 'one-editor-container editor-left' });
+		this.containers[Position.LEFT] = $(parent).div({ class: 'one-editor-container editor-left monaco-editor-background' });
 
 		// Left Sash
 		this.leftSash = new Sash(parent.getHTMLElement(), this, { baseSize: 5 });
 		this.leftSash.addListener('start', () => this.onLeftSashDragStart());
 		this.leftSash.addListener('change', (e: ISashEvent) => this.onLeftSashDrag(e));
 		this.leftSash.addListener('end', () => this.onLeftSashDragEnd());
+		this.leftSash.addListener('reset', () => this.onLeftSashReset());
 		this.leftSash.hide();
 
 		// Center Container
-		this.containers[Position.CENTER] = $(parent).div({ class: 'one-editor-container editor-center' });
+		this.containers[Position.CENTER] = $(parent).div({ class: 'one-editor-container editor-center monaco-editor-background' });
 
 		// Right Sash
 		this.rightSash = new Sash(parent.getHTMLElement(), this, { baseSize: 5 });
 		this.rightSash.addListener('start', () => this.onRightSashDragStart());
 		this.rightSash.addListener('change', (e: ISashEvent) => this.onRightSashDrag(e));
 		this.rightSash.addListener('end', () => this.onRightSashDragEnd());
+		this.rightSash.addListener('reset', () => this.onRightSashReset());
 		this.rightSash.hide();
 
 		// Right Container
-		this.containers[Position.RIGHT] = $(parent).div({ class: 'one-editor-container editor-right' });
+		this.containers[Position.RIGHT] = $(parent).div({ class: 'one-editor-container editor-right monaco-editor-background' });
 
 		// Title containers
 		POSITIONS.forEach((position) => {
-			this.titleContainer[position] = $(this.containers[position]).div({ 'class': 'title monaco-editor-background' });
+			this.titleContainer[position] = $(this.containers[position]).div({ 'class': 'title' });
 			this.fillTitleArea($(this.titleContainer[position]), position);
 		});
 
@@ -791,7 +773,7 @@ export class SideBySideEditorControl extends EventEmitter implements IVerticalSa
 		// Decoration
 		let titleLabel = (input && input.getName()) || '';
 		if (status && status.decoration) {
-			titleLabel = nls.localize('inputDecoration', "{0} {1}", status.decoration, titleLabel);
+			titleLabel = nls.localize({ key: 'inputDecoration', comment: ['editor status indicator (e.g. dirty indicator)', 'editor input title'] }, "{0} {1}", status.decoration, titleLabel);
 		}
 
 		this.titleLabel[position].safeInnerHtml(titleLabel);
@@ -1028,32 +1010,6 @@ export class SideBySideEditorControl extends EventEmitter implements IVerticalSa
 			}
 		});
 
-		// Right Actions Container
-		parent.div({
-			'class': 'title-actions'
-		}, (div) => {
-
-			// Toolbar
-			this.editorActionsToolbar[position] = new ToolBar(div.getHTMLElement(), this.contextMenuService, {
-				actionItemProvider: (action: Action) => this.actionItemProvider(action, position),
-				orientation: ActionsOrientation.HORIZONTAL
-			});
-
-			// Action Run Handling
-			this.editorActionsToolbar[position].actionRunner.addListener(BaseEventType.RUN, (e: any) => {
-
-				// Check for Error
-				if (e.error && !errors.isPromiseCanceledError(e.error)) {
-					this.messageService.show(Severity.Error, e.error);
-				}
-
-				// Log in telemetry
-				if (this.telemetryService) {
-					this.telemetryService.publicLog('workbenchActionExecuted', { id: e.action.id, from: 'editorPart' });
-				}
-			});
-		});
-
 		// Left Title Label (click opens quick open unless we are configured to ignore click or we are not the active title)
 		parent.div({
 			'class': 'title-label'
@@ -1073,6 +1029,33 @@ export class SideBySideEditorControl extends EventEmitter implements IVerticalSa
 
 			// Subtle Description
 			this.titleDescription[position] = $(div).span().on(DOM.EventType.CLICK, clickHandler);
+		});
+
+		// Right Actions Container
+		parent.div({
+			'class': 'title-actions'
+		}, (div) => {
+
+			// Toolbar
+			this.editorActionsToolbar[position] = new ToolBar(div.getHTMLElement(), this.contextMenuService, {
+				actionItemProvider: (action: Action) => this.actionItemProvider(action, position),
+				orientation: ActionsOrientation.HORIZONTAL,
+				ariaLabel: nls.localize('araLabelEditorActions', "Editor actions")
+			});
+
+			// Action Run Handling
+			this.editorActionsToolbar[position].actionRunner.addListener(BaseEventType.RUN, (e: any) => {
+
+				// Check for Error
+				if (e.error && !errors.isPromiseCanceledError(e.error)) {
+					this.messageService.show(Severity.Error, e.error);
+				}
+
+				// Log in telemetry
+				if (this.telemetryService) {
+					this.telemetryService.publicLog('workbenchActionExecuted', { id: e.action.id, from: 'editorPart' });
+				}
+			});
 		});
 	}
 
@@ -1231,6 +1214,14 @@ export class SideBySideEditorControl extends EventEmitter implements IVerticalSa
 		this.editorActionsToolbar[position].setActions([], [])();
 	}
 
+	private centerSash(a: Position, b: Position): void {
+		let sumWidth = this.containerWidth[a] + this.containerWidth[b];
+		let meanWidth = sumWidth / 2;
+		this.containerWidth[a] = meanWidth;
+		this.containerWidth[b] = sumWidth - meanWidth;
+		this.layoutContainers();
+	}
+
 	private onLeftSashDragStart(): void {
 		this.startLeftContainerWidth = this.containerWidth[Position.LEFT];
 	}
@@ -1320,6 +1311,11 @@ export class SideBySideEditorControl extends EventEmitter implements IVerticalSa
 		this.focusNextNonMinimized();
 	}
 
+	private onLeftSashReset(): void {
+		this.centerSash(Position.LEFT, Position.CENTER);
+		this.leftSash.layout();
+	}
+
 	private onRightSashDragStart(): void {
 		this.startRightContainerWidth = this.containerWidth[Position.RIGHT];
 	}
@@ -1375,6 +1371,11 @@ export class SideBySideEditorControl extends EventEmitter implements IVerticalSa
 		this.leftSash.layout(); // Moving right sash might have also moved left sash, so layout() both
 		this.rightSash.layout();
 		this.focusNextNonMinimized();
+	}
+
+	private onRightSashReset(): void {
+		this.centerSash(Position.CENTER, Position.RIGHT);
+		this.rightSash.layout();
 	}
 
 	public getVerticalSashTop(sash: Sash): number {
@@ -1557,10 +1558,6 @@ export class SideBySideEditorControl extends EventEmitter implements IVerticalSa
 		this.containers.forEach((container) => {
 			container.destroy();
 		});
-
-		if (this.globalFocusTracker) {
-			this.globalFocusTracker.dispose();
-		}
 
 		if (this.editorInputStateChangeListener) {
 			this.editorInputStateChangeListener();

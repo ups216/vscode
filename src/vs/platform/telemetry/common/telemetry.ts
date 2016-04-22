@@ -4,73 +4,91 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import Lifecycle = require('vs/base/common/lifecycle');
-import Timer = require('vs/base/common/timer');
-import {createDecorator, ServiceIdentifier, IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
+import {TPromise} from 'vs/base/common/winjs.base';
+import {IDisposable} from 'vs/base/common/lifecycle';
+import {ITimerEvent, nullEvent} from 'vs/base/common/timer';
+import {createDecorator, ServiceIdentifier, IInstantiationService, ServicesAccessor, IConstructorSignature0} from 'vs/platform/instantiation/common/instantiation';
 
-export var ID = 'telemetryService';
-
-export var ITelemetryService = createDecorator<ITelemetryService>(ID);
+export const ITelemetryService = createDecorator<ITelemetryService>('telemetryService');
 
 export interface ITelemetryInfo {
-		sessionId: string;
-		machineId: string;
-		instanceId: string;
+	sessionId: string;
+	machineId: string;
+	instanceId: string;
 }
 
-export interface ITelemetryService extends Lifecycle.IDisposable {
-	serviceId : ServiceIdentifier<any>;
+export interface ITelemetryService {
+	serviceId: ServiceIdentifier<any>;
 
 	/**
 	 * Sends a telemetry event that has been privacy approved.
 	 * Do not call this unless you have been given approval.
 	 */
-	publicLog(eventName: string, data?: any):void;
+	publicLog(eventName: string, data?: any): void;
 
 	/**
 	 * Starts a telemetry timer. Call stop() to send the event.
 	 */
-	start(name:string, data?:any):Timer.ITimerEvent;
+	timedPublicLog(name: string, data?: any): ITimerEvent;
 
-	/**
-	 * Session Id
-	 */
-	getSessionId(): string;
+	getTelemetryInfo(): TPromise<ITelemetryInfo>;
 
-	/**
-	 * a unique Id that is not hardware specific
-	 */
-	getInstanceId(): string;
-
-	/**
-	 * a hardware specific machine Id
-	 */
-	getMachineId(): string;
-
-	getTelemetryInfo(): Thenable<ITelemetryInfo>;
-
-	/**
-	 * Appender operations
-	 */
-	getAppendersCount(): number;
-	getAppenders(): ITelemetryAppender[];
-	addTelemetryAppender(appender: ITelemetryAppender): void;
-	removeTelemetryAppender(appender: ITelemetryAppender): void;
-	setInstantiationService(instantiationService: IInstantiationService): void;
+	addTelemetryAppender(appender: ITelemetryAppender): IDisposable;
 }
 
-export interface ITelemetryAppender extends Lifecycle.IDisposable {
+export namespace Extenstions {
+
+	let _telemetryAppenderCtors: IConstructorSignature0<ITelemetryAppender>[] = [];
+
+	export const TelemetryAppenders = {
+		activate(accessor: ServicesAccessor): void {
+			const telemetryService = accessor.get(ITelemetryService);
+			const instantiationService = accessor.get(IInstantiationService);
+			for (let ctor of _telemetryAppenderCtors) {
+				const instance = instantiationService.createInstance(ctor);
+				telemetryService.addTelemetryAppender(instance);
+			}
+			// can only be done once
+			_telemetryAppenderCtors = undefined;
+		},
+		registerTelemetryAppenderDescriptor(ctor: IConstructorSignature0<ITelemetryAppender>): void {
+			_telemetryAppenderCtors.push(ctor);
+		}
+	};
+};
+
+export interface ITelemetryAppendersRegistry {
+	activate(instantiationService: IInstantiationService): void;
+}
+
+export const NullTelemetryService: ITelemetryService = {
+	serviceId: undefined,
+	timedPublicLog(name: string, data?: any): ITimerEvent { return nullEvent; },
+	publicLog(eventName: string, data?: any): void { },
+	addTelemetryAppender(appender): IDisposable { return { dispose() { } }; },
+	getTelemetryInfo(): TPromise<ITelemetryInfo> {
+		return TPromise.as({
+			instanceId: 'someValue.instanceId',
+			sessionId: 'someValue.sessionId',
+			machineId: 'someValue.machineId'
+		});
+	}
+};
+
+export interface ITelemetryAppender extends IDisposable {
 	log(eventName: string, data?: any): void;
 }
+
+// --- util
 
 export function anonymize(input: string): string {
 	if (!input) {
 		return input;
 	}
 
-	var r = '';
-	for (var i = 0; i < input.length; i++) {
-		var ch = input[i];
+	let r = '';
+	for (let i = 0; i < input.length; i++) {
+		let ch = input[i];
 		if (ch >= '0' && ch <= '9') {
 			r += '0';
 			continue;

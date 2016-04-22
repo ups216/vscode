@@ -7,47 +7,29 @@
 
 import 'vs/workbench/browser/parts/editor/editor.contribution'; // make sure to load all contributed editor things into tests
 import {Promise, TPromise} from 'vs/base/common/winjs.base';
-import Objects = require('vs/base/common/objects');
 import EventEmitter = require('vs/base/common/eventEmitter');
-import Strings = require('vs/base/common/strings');
 import Paths = require('vs/base/common/paths');
-import Env = require('vs/base/common/flags');
 import URI from 'vs/base/common/uri';
-import MainTelemetryService = require('vs/platform/telemetry/browser/mainTelemetryService');
-import Storage = require('vs/workbench/browser/storage');
+import {NullTelemetryService} from 'vs/platform/telemetry/common/telemetry';
+import Storage = require('vs/workbench/common/storage');
 import WorkbenchEditorCommon = require('vs/workbench/common/editor');
-import Viewlet = require('vs/workbench/browser/viewlet');
-import InstantiationService = require('vs/platform/instantiation/common/instantiationService');
-import LifecycleService = require('vs/platform/lifecycle/common/baseLifecycleService');
+import Event from 'vs/base/common/event';
 import Types = require('vs/base/common/types');
-import Mime = require('vs/base/common/mime');
-import {EventProvider} from 'vs/base/common/eventProvider';
-import Assert = require('vs/base/common/assert');
 import Severity from 'vs/base/common/severity';
-import Arrays = require('vs/base/common/arrays');
-import Errors = require('vs/base/common/errors');
 import http = require('vs/base/common/http');
+import {IConfigurationService} from 'vs/platform/configuration/common/configuration';
 import {IStorageService, StorageScope} from 'vs/platform/storage/common/storage';
-import UntitledEditorService = require('vs/workbench/services/untitled/browser/untitledEditorService');
 import WorkbenchEditorService = require('vs/workbench/services/editor/common/editorService');
-import QuickOpenService = require('vs/workbench/services/quickopen/browser/quickOpenService');
-import ViewletService = require('vs/workbench/services/viewlet/common/viewletService');
+import QuickOpenService = require('vs/workbench/services/quickopen/common/quickOpenService');
 import PartService = require('vs/workbench/services/part/common/partService');
 import WorkspaceContextService = require('vs/workbench/services/workspace/common/contextService');
-import ViewletCommon = require('vs/workbench/common/viewlet');
-import Files = require('vs/platform/files/common/files');
-import {BaseWorkspaceContextService} from 'vs/platform/workspace/common/baseWorkspaceContextService';
-import {IEditorInput, IEditorModel, IEditorOptions, ITextInput, Position, IEditor, IResourceInput, ITextEditorModel} from 'vs/platform/editor/common/editor';
+import {IEditorInput, IEditorModel, Position, IEditor, IResourceInput, ITextEditorModel} from 'vs/platform/editor/common/editor';
 import {IEventService} from 'vs/platform/event/common/event';
-import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
+import {IUntitledEditorService} from 'vs/workbench/services/untitled/common/untitledEditorService';
 import {IMessageService, IConfirmation} from 'vs/platform/message/common/message';
 import Lifecycle = require('vs/base/common/lifecycle');
-import {IRequestService} from 'vs/platform/request/common/request';
 import {BaseRequestService} from 'vs/platform/request/common/baseRequestService';
-import {ITelemetryService, ITelemetryInfo} from 'vs/platform/telemetry/common/telemetry';
-import {IWorkspaceContextService, IWorkspace, IConfiguration} from 'vs/platform/workspace/common/workspace';
-import {IKeybindingService, IKeybindingContextKey, IKeybindingItem} from 'vs/platform/keybinding/common/keybindingService';
-import {Keybinding} from 'vs/base/common/keyCodes';
+import {IWorkspace, IConfiguration} from 'vs/platform/workspace/common/workspace';
 
 export const TestWorkspace: IWorkspace = {
 	resource: URI.file('C:\\testWorkspace'),
@@ -71,7 +53,11 @@ export class TestContextService implements WorkspaceContextService.IWorkspaceCon
 	constructor(workspace: any = TestWorkspace, configuration: any = TestConfiguration, options: any = null) {
 		this.workspace = workspace;
 		this.configuration = configuration;
-		this.options = options;
+		this.options = options || {
+			globalSettings: {
+				settings: {}
+			}
+		};
 	}
 
 	public getWorkspace(): IWorkspace {
@@ -88,10 +74,6 @@ export class TestContextService implements WorkspaceContextService.IWorkspaceCon
 
 	public updateOptions() {
 
-	}
-
-	public isAutoSaveEnabled() {
-		return true;
 	}
 
 	public isInsideWorkspace(resource: URI): boolean {
@@ -145,77 +127,6 @@ export class TestMessageService implements IMessageService {
 	}
 }
 
-export class TestKeybindingService implements IKeybindingService {
-	public serviceId = IKeybindingService;
-
-	public dispose(): void { }
-	public setMessageService(messageService: IMessageService): void { }
-	public setInstantiationService(instantiationService: IInstantiationService): void { }
-	public setContext(key: string, value: any): void { }
-	public removeContext(key: string): void { }
-	public executeCommand(commandId: string, args: any): void { }
-
-	public createKey<T>(key: string, defaultValue: T): IKeybindingContextKey<T> {
-		return null;
-	}
-
-	public createScoped(domNode: HTMLElement): IKeybindingService {
-		return this;
-	}
-
-	public getDefaultKeybindings(): string {
-		return null;
-	}
-
-	public lookupKeybindings(commandId: string): Keybinding[] {
-		return [];
-	}
-
-	public customKeybindingsCount(): number {
-		return 0;
-	}
-}
-
-export class TestTelemetryService implements ITelemetryService {
-	public serviceId = ITelemetryService;
-
-	getSessionId(): string {
-		return null;
-	}
-
-	getMachineId(): string {
-		return null;
-	}
-
-	getInstanceId(): string {
-		return null;
-	}
-
-	getTelemetryInfo(): TPromise<ITelemetryInfo> {
-		return TPromise.as(null);
-	}
-
-	log(eventName: string, data?: any): void { }
-	publicLog(eventName: string, data?: any): void { }
-
-	start(name: string, data?: any, isPublic?: boolean): any {
-		return null;
-	}
-
-	getAppendersCount(): number {
-		return -1;
-	}
-
-	getAppenders(): any[] {
-		return [];
-	}
-
-	addTelemetryAppender(appender): void { }
-	removeTelemetryAppender(appender): void { }
-	dispose(): void { }
-	setInstantiationService(instantiationService: IInstantiationService) { }
-}
-
 export class TestPartService implements PartService.IPartService {
 	public serviceId = PartService.IPartService;
 
@@ -226,7 +137,7 @@ export class TestPartService implements PartService.IPartService {
 	}
 
 	public joinCreation(): Promise {
-		return Promise.as(null);
+		return TPromise.as(null);
 	}
 
 	public hasFocus(part): boolean {
@@ -243,6 +154,12 @@ export class TestPartService implements PartService.IPartService {
 
 	public setSideBarHidden(hidden: boolean): void { }
 
+	public isPanelHidden(): boolean {
+		return false;
+	}
+
+	public setPanelHidden(hidden: boolean): void { }
+
 	public getSideBarPosition() {
 		return 0;
 	}
@@ -255,8 +172,6 @@ export class TestPartService implements PartService.IPartService {
 export class TestEventService extends EventEmitter.EventEmitter implements IEventService {
 	public serviceId = IEventService;
 }
-
-export class TestLifecycleService extends LifecycleService.BaseLifecycleService { }
 
 export class TestStorageService extends EventEmitter.EventEmitter implements IStorageService {
 	public serviceId = IStorageService;
@@ -298,7 +213,7 @@ export class TestStorageService extends EventEmitter.EventEmitter implements ISt
 export class TestRequestService extends BaseRequestService {
 
 	constructor(workspace = TestWorkspace) {
-		super(new TestContextService(), new MainTelemetryService.MainTelemetryService());
+		super(new TestContextService(), NullTelemetryService);
 	}
 }
 
@@ -314,7 +229,7 @@ export interface IMockRequestHandler {
 export class MockRequestService extends BaseRequestService {
 
 	constructor(workspace: any, private handler: IMockRequestHandler) {
-		super(new TestContextService(), new MainTelemetryService.MainTelemetryService());
+		super(new TestContextService(), NullTelemetryService);
 	}
 
 	public makeRequest(options: http.IXHROptions): TPromise<http.IXHRResponse> {
@@ -337,8 +252,8 @@ export class MockRequestService extends BaseRequestService {
 	}
 }
 
-export class TestUntitledEditorService implements UntitledEditorService.IUntitledEditorService {
-	public serviceId = UntitledEditorService.IUntitledEditorService;
+export class TestUntitledEditorService implements IUntitledEditorService {
+	public serviceId = IUntitledEditorService;
 
 	public get(resource: URI) {
 		return null;
@@ -379,11 +294,11 @@ export class TestEditorService implements WorkbenchEditorService.IWorkbenchEdito
 	}
 
 	public setEditors(inputs): Promise {
-		return Promise.as([]);
+		return TPromise.as([]);
 	}
 
 	public closeEditors(othersOnly?: boolean): Promise {
-		return Promise.as(null);
+		return TPromise.as(null);
 	}
 
 	public isVisible(input: IEditorInput, includeDiff: boolean): boolean {
@@ -408,6 +323,12 @@ export class TestEditorService implements WorkbenchEditorService.IWorkbenchEdito
 		return [];
 	}
 
+	public activateEditor(position: Position): void;
+	public activateEditor(editor: IEditor): void;
+	public activateEditor(arg: any): void {
+		this.callback('activateEditor');
+	}
+
 	public moveEditor(from: Position, to: Position): void {
 		this.callback('moveEditor');
 	}
@@ -423,12 +344,11 @@ export class TestEditorService implements WorkbenchEditorService.IWorkbenchEdito
 		this.activeEditorOptions = options;
 		this.activeEditorPosition = position;
 
-		return Promise.as(null);
+		return TPromise.as(null);
 	}
 
 	public resolveEditorModel(input: IEditorInput, refresh?: boolean): TPromise<IEditorModel>;
 	public resolveEditorModel(input: IResourceInput, refresh?: boolean): TPromise<ITextEditorModel>;
-	public resolveEditorModel(input: WorkbenchEditorService.IFileInput, refresh?: boolean): TPromise<ITextEditorModel>;
 	public resolveEditorModel(input: any, refresh?: boolean): Promise {
 		this.callback('resolveEditorModel');
 
@@ -452,8 +372,8 @@ export class TestEditorService implements WorkbenchEditorService.IWorkbenchEdito
 		return TPromise.as(null);
 	}
 
-	public inputToType(input: ITextInput): TPromise<IEditorInput> {
-		return Promise.as(null);
+	public inputToType(input: IResourceInput): TPromise<IEditorInput> {
+		return TPromise.as(null);
 	}
 }
 
@@ -462,68 +382,90 @@ export class TestQuickOpenService implements QuickOpenService.IQuickOpenService 
 
 	private callback: (prefix: string) => void;
 
-	constructor(callback: (prefix: string) => void) {
+	constructor(callback?: (prefix: string) => void) {
 		this.callback = callback;
 	}
 
 	pick(arg: any, placeHolder?: string, autoFocusFirst?: boolean): Promise {
-		return Promise.as(null);
+		return TPromise.as(null);
 	}
 
 	input(options?: any): Promise {
-		return Promise.as(null);
+		return TPromise.as(null);
 	}
 
 	refresh(): Promise {
-		return Promise.as(true);
+		return TPromise.as(true);
 	}
 
 	show(prefix?: string, quickNavigateConfiguration?: any): Promise {
-		this.callback(prefix);
+		if (this.callback) {
+			this.callback(prefix);
+		}
 
-		return Promise.as(true);
+		return TPromise.as(true);
 	}
 
 	getEditorHistory(): WorkbenchEditorCommon.EditorInput[] {
 		return [];
 	}
 
-	get onShow(): EventProvider<() => void> {
+	get onShow(): Event<void> {
 		return null;
 	}
 
-	get onHide(): EventProvider<() => void> {
+	get onHide(): Event<void> {
 		return null;
 	}
 
-	public removeEditorHistoryEntry(input: WorkbenchEditorCommon.EditorInput): void {}
-	public dispose() {}
-	public quickNavigate(): void {}
+	public removeEditorHistoryEntry(input: WorkbenchEditorCommon.EditorInput): void { }
+	public dispose() { }
+	public quickNavigate(): void { }
 }
 
 export const TestFileService = {
-	resolveContent: function(resource) {
-		return Promise.as({
+	resolveContent: function (resource) {
+		return TPromise.as({
 			resource: resource,
 			value: 'Hello Html',
 			etag: 'index.txt',
 			mime: 'text/plain',
-			charset: 'utf8',
+			encoding: 'utf8',
 			mtime: new Date().getTime(),
 			name: Paths.basename(resource.fsPath)
 		});
 	},
 
-	updateContent: function(res) {
-		return Promise.timeout(1).then(() => {
+	updateContent: function (res) {
+		return TPromise.timeout(1).then(() => {
 			return {
 				resource: res,
 				etag: 'index.txt',
 				mime: 'text/plain',
-				charset: 'utf8',
+				encoding: 'utf8',
 				mtime: new Date().getTime(),
 				name: Paths.basename(res.fsPath)
 			};
 		});
+	}
+};
+
+export class TestConfigurationService extends EventEmitter.EventEmitter implements IConfigurationService {
+	public serviceId = IConfigurationService;
+
+	public loadConfiguration<T>(section?: string): TPromise<T> {
+		return TPromise.as(this.getConfiguration());
+	}
+
+	public getConfiguration(): any {
+		return {};
+	}
+
+	public hasWorkspaceConfiguration(): boolean {
+		return false;
+	}
+
+	public onDidUpdateConfiguration() {
+		return { dispose() { } };
 	}
 }

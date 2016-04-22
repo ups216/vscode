@@ -1,10 +1,11 @@
-/* --------------------------------------------------------------------------------------------
- * Copyright (c) Microsoft Corporation. All rights reserved.
- * Licensed under the MIT License. See License.txt in the project root for license information.
- * ------------------------------------------------------------------------------------------ */
- 'use strict';
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
 
-import { workspace, RenameProvider, WorkspaceEdit, TextDocument, Position, Range, CancellationToken } from 'vscode';
+'use strict';
+
+import { RenameProvider, WorkspaceEdit, TextDocument, Position, Range, CancellationToken } from 'vscode';
 
 import * as Proto from '../protocol';
 import { ITypescriptServiceClient } from '../typescriptService';

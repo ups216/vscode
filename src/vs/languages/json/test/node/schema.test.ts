@@ -25,7 +25,8 @@ suite('JSON - schema', () => {
 		'http://schema.management.azure.com/schemas/2015-01-01/Microsoft.Resources.json': 'Microsoft.Resources.json',
 		'http://schema.management.azure.com/schemas/2014-04-01-preview/Microsoft.Sql.json': 'Microsoft.Sql.json',
 		'http://schema.management.azure.com/schemas/2014-06-01/Microsoft.Web.json': 'Microsoft.Web.json',
-		'http://schema.management.azure.com/schemas/2014-04-01/SuccessBricks.ClearDB.json': 'SuccessBricks.ClearDB.json'
+		'http://schema.management.azure.com/schemas/2014-04-01/SuccessBricks.ClearDB.json': 'SuccessBricks.ClearDB.json',
+		'http://schema.management.azure.com/schemas/2015-08-01/Microsoft.Compute.json': 'Microsoft.Compute.json'
 	}
 
 	var requestServiceMock = <IRequestService> {
@@ -73,6 +74,44 @@ suite('JSON - schema', () => {
 				description: 'Test description'
 			});
 		}).done(() => testDone(), (error) => {
+			testDone(error);
+		});
+
+	});
+
+	test('Resolving $refs 2', function(testDone) {
+		var service = new SchemaService.JSONSchemaService(requestServiceMock);
+		service.setSchemaContributions({ schemas: {
+			"http://json.schemastore.org/swagger-2.0" : {
+				id: 'http://json.schemastore.org/swagger-2.0',
+				type: 'object',
+					properties: {
+						"responseValue": {
+							"$ref": "#/definitions/jsonReference"
+						}
+					},
+					definitions: {
+						"jsonReference": {
+							"type": "object",
+							"required": [ "$ref" ],
+							"properties": {
+								"$ref": {
+									"type": "string"
+								}
+							}
+						}
+					}
+				}
+			}
+		});
+
+		service.getResolvedSchema('http://json.schemastore.org/swagger-2.0').then(fs => {
+			assert.deepEqual(fs.schema.properties['responseValue'], {
+				type: 'object',
+				required: [ "$ref" ],
+				properties: { $ref: { type: 'string' }}
+			});
+		}).then(() => testDone(), (error) => {
 			testDone(error);
 		});
 
@@ -340,8 +379,8 @@ suite('JSON - schema', () => {
 		var service : SchemaService.IJSONSchemaService = new SchemaService.JSONSchemaService(requestServiceMock);
 
 		var input = {
-  			"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
-  			"contentVersion": "1.0.0.0",
+			"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+			"contentVersion": "1.0.0.0",
 			"resources": [
 				{
 					"name": "SQLServer",
@@ -383,8 +422,8 @@ suite('JSON - schema', () => {
 		var service : SchemaService.IJSONSchemaService = new SchemaService.JSONSchemaService(requestServiceMock);
 
 		var input = {
-  			"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
-  			"contentVersion": "1.0.0.0",
+			"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+			"contentVersion": "1.0.0.0",
 			"resources": [
 				{
 					"name": "foo",
@@ -406,6 +445,78 @@ suite('JSON - schema', () => {
 			document.validate(resolveSchema.schema, matchingSchemas);
 			assert.deepEqual(document.errors, []);
 			assert.equal(document.warnings.length, 1);
+		}).done(() => testDone(), (error) => {
+			testDone(error);
+		});
+
+	});
+
+	test('Validate Azure Resource Dfinition', function(testDone) {
+
+
+		var service : SchemaService.IJSONSchemaService = new SchemaService.JSONSchemaService(requestServiceMock);
+
+		var input = {
+			"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+			"contentVersion": "1.0.0.0",
+			"resources": [
+				{
+					"apiVersion": "2015-06-15",
+					"type": "Microsoft.Compute/virtualMachines",
+					"name": "a",
+					"location": "West US",
+					"properties": {
+						"hardwareProfile": {
+							"vmSize": "Small"
+						},
+						"osProfile": {
+							"computername": "a",
+							"adminUsername": "a",
+							"adminPassword": "a"
+						},
+						"storageProfile": {
+							"imageReference": {
+								"publisher": "a",
+								"offer": "a",
+								"sku": "a",
+								"version": "latest"
+							},
+							"osDisk": {
+								"name": "osdisk",
+								"vhd": {
+									"uri": "[concat('http://', 'b','.blob.core.windows.net/',variables('vmStorageAccountContainerName'),'/',variables('OSDiskName'),'.vhd')]"
+								},
+								"caching": "ReadWrite",
+								"createOption": "FromImage"
+							}
+						},
+						"networkProfile": {
+							"networkInterfaces": [
+								{
+									"id": "[resourceId('Microsoft.Network/networkInterfaces',variables('nicName'))]"
+								}
+							]
+						},
+						"diagnosticsProfile": {
+							"bootDiagnostics": {
+								"enabled": "true",
+								"storageUri": "[concat('http://',parameters('newStorageAccountName'),'.blob.core.windows.net')]"
+							}
+						}
+					}
+				}
+			]
+		}
+		var parser = new Parser.JSONParser();
+		var document = parser.parse(JSON.stringify(input));
+
+		service.getSchemaForResource('file://doc/mydoc.json', document).then(resolvedSchema => {
+			assert.deepEqual(resolvedSchema.errors, []);
+
+			document.validate(resolvedSchema.schema);
+
+			assert.equal(document.warnings.length, 1);
+			assert.equal(document.warnings[0].message, 'Missing property "computerName"');
 		}).done(() => testDone(), (error) => {
 			testDone(error);
 		});

@@ -8,8 +8,8 @@ import WinJS = require('vs/base/common/winjs.base');
 import WorkbenchEditorCommon = require('vs/workbench/common/editor');
 import EventEmitter = require('vs/base/common/eventEmitter');
 import Lifecycle = require('vs/base/common/lifecycle');
-import output = require('vs/workbench/parts/output/common/output');
-import {createDecorator, ServiceIdentifier} from 'vs/platform/instantiation/common/instantiation'
+import Event from 'vs/base/common/event';
+import {createDecorator, ServiceIdentifier} from 'vs/platform/instantiation/common/instantiation';
 
 // Model raw interfaces
 
@@ -19,6 +19,10 @@ export interface IRawFileStatus {
 	path: string;
 	mimetype: string;
 	rename?: string;
+}
+
+export interface IRemote {
+	name: string;
 }
 
 export interface IHead {
@@ -38,11 +42,13 @@ export interface ITag {
 }
 
 export interface IRawStatus {
+	repositoryRoot: string;
 	state?: ServiceState;
 	status: IRawFileStatus[];
 	HEAD: IBranch;
 	heads: IBranch[];
 	tags: ITag[];
+	remotes: IRemote[];
 }
 
 // Model enums
@@ -81,7 +87,8 @@ export var ModelEvents = {
 	STATUS_MODEL_UPDATED: 'StatusModelUpdated',
 	HEAD_UPDATED: 'HEADUpdated',
 	HEADS_UPDATED: 'HEADSUpdated',
-	TAGS_UPDATED: 'TagsUpdated'
+	TAGS_UPDATED: 'TagsUpdated',
+	REMOTES_UPDATED: 'RemotesUpdated'
 };
 
 // Model interfaces
@@ -102,7 +109,7 @@ export interface IStatusGroup extends EventEmitter.IEventEmitter {
 	getType(): StatusType;
 	update(statusList: IFileStatus[]): void;
 	all(): IFileStatus[];
-	find(path: string): IFileStatus
+	find(path: string): IFileStatus;
 }
 
 export interface IStatusSummary {
@@ -113,7 +120,7 @@ export interface IStatusSummary {
 
 export interface IStatusModel extends EventEmitter.IEventEmitter {
 	getSummary(): IStatusSummary;
-	update(rawStatuses: IRawFileStatus[]): void;
+	update(status: IRawFileStatus[]): void;
 	getIndexStatus(): IStatusGroup;
 	getWorkingTreeStatus(): IStatusGroup;
 	getMergeStatus(): IStatusGroup;
@@ -122,10 +129,12 @@ export interface IStatusModel extends EventEmitter.IEventEmitter {
 }
 
 export interface IModel extends EventEmitter.IEventEmitter {
+	getRepositoryRoot(): string;
 	getStatus(): IStatusModel;
 	getHEAD(): IBranch;
 	getHeads(): IBranch[];
 	getTags(): ITag[];
+	getRemotes(): IRemote[];
 	update(status: IRawStatus): void;
 	getPS1(): string;
 }
@@ -190,7 +199,8 @@ export var ServiceEvents = {
 	OPERATION_START: 'operationStart',
 	OPERATION_END: 'operationEnd',
 	OPERATION: 'operation',
-	ERROR: 'error'
+	ERROR: 'error',
+	DISPOSE: 'dispose'
 };
 
 // Service operations
@@ -234,17 +244,22 @@ export interface IGitCredentialScope {
 	path: string;
 }
 
-export interface IGitCredentials {
+export interface ICredentials {
 	username: string;
 	password: string;
-	store: boolean;
 }
 
 export interface IGitServiceError extends Error {
 	gitErrorCode: string;
 }
 
+export interface IPushOptions {
+	setUpstream?: boolean;
+}
+
 export interface IRawGitService {
+	onOutput: Event<string>;
+	getVersion(): WinJS.TPromise<string>;
 	serviceState(): WinJS.TPromise<RawServiceState>;
 	status(): WinJS.TPromise<IRawStatus>;
 	init(): WinJS.TPromise<IRawStatus>;
@@ -257,13 +272,12 @@ export interface IRawGitService {
 	reset(treeish:string, hard?: boolean): WinJS.TPromise<IRawStatus>;
 	revertFiles(treeish:string, filePaths?: string[]): WinJS.TPromise<IRawStatus>;
 	fetch(): WinJS.TPromise<IRawStatus>;
-	pull(): WinJS.TPromise<IRawStatus>;
-	push(): WinJS.TPromise<IRawStatus>;
+	pull(rebase?: boolean): WinJS.TPromise<IRawStatus>;
+	push(remote?: string, name?: string, options?:IPushOptions): WinJS.TPromise<IRawStatus>;
 	sync(): WinJS.TPromise<IRawStatus>;
 	commit(message:string, amend?: boolean, stage?: boolean): WinJS.TPromise<IRawStatus>;
 	detectMimetypes(path: string, treeish?: string): WinJS.TPromise<string[]>;
 	show(path: string, treeish?: string): WinJS.TPromise<string>;
-	onOutput(): WinJS.Promise;
 }
 
 export var GIT_SERVICE_ID = 'gitService';
@@ -272,6 +286,7 @@ export var IGitService = createDecorator<IGitService>(GIT_SERVICE_ID);
 
 export interface IGitService extends EventEmitter.IEventEmitter {
 	serviceId: ServiceIdentifier<any>;
+	onOutput: Event<string>;
 	status(): WinJS.TPromise<IModel>;
 	init(): WinJS.TPromise<IModel>;
 	add(files?: IFileStatus[]): WinJS.TPromise<IModel>;
@@ -283,8 +298,8 @@ export interface IGitService extends EventEmitter.IEventEmitter {
 	reset(treeish:string, hard?: boolean): WinJS.TPromise<IModel>;
 	revertFiles(treeish:string, files?: IFileStatus[]): WinJS.TPromise<IModel>;
 	fetch(): WinJS.TPromise<IModel>;
-	pull(): WinJS.TPromise<IModel>;
-	push(): WinJS.TPromise<IModel>;
+	pull(rebase?: boolean): WinJS.TPromise<IModel>;
+	push(remote?: string, name?: string, options?:IPushOptions): WinJS.TPromise<IModel>;
 	sync(): WinJS.TPromise<IModel>;
 	commit(message:string, amend?: boolean, stage?: boolean): WinJS.TPromise<IModel>;
 	detectMimetypes(path: string, treeish?: string): WinJS.Promise;
@@ -298,8 +313,10 @@ export interface IGitService extends EventEmitter.IEventEmitter {
 	isIdle(): boolean;
 	getRunningOperations(): IGitOperation[];
 	getAutoFetcher(): IAutoFetcher;
+}
 
-	onOutput(): WinJS.Promise;
+export interface IAskpassService {
+	askpass(id: string, host: string, command: string): WinJS.TPromise<ICredentials>;
 }
 
 // Utils

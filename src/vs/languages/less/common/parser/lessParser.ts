@@ -49,7 +49,7 @@ export class LessParser extends cssParser.Parser {
 	}
 
 	public _parseMediaQuery(resyncStopToken: scanner.TokenType[]): nodes.Node {
- 		var node = <nodes.MediaQuery> super._parseMediaQuery(resyncStopToken);
+		var node = <nodes.MediaQuery> super._parseMediaQuery(resyncStopToken);
 		if (!node) {
 			var node = <nodes.MediaQuery> this.create(nodes.MediaQuery);
 			if (node.addChild(this._parseVariable())) {
@@ -264,7 +264,7 @@ export class LessParser extends cssParser.Parser {
 		}
 		if (!node.setSelector(this._parseSimpleSelector())) {
 			return this.finish(node, errors.ParseError.SelectorExpected);
-		};
+		}
 		if (!this.accept(scanner.TokenType.ParenthesisR)) {
 			return this.finish(node, errors.ParseError.RightParenthesisExpected);
 		}

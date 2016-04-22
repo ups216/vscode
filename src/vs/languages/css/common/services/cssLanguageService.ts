@@ -4,11 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import network = require('vs/base/common/network');
+import URI from 'vs/base/common/uri';
 import winjs = require('vs/base/common/winjs.base');
 import nodes = require('vs/languages/css/common/parser/cssNodes');
 import parser = require('vs/languages/css/common/parser/cssParser');
-import eventEmitter = require('vs/base/common/eventEmitter');
 import EditorCommon = require('vs/editor/common/editorCommon');
 import resourceService = require('vs/editor/common/services/resourceService');
 
@@ -19,7 +18,7 @@ interface Entry {
 
 export interface ILanguageService {
 	join():winjs.TPromise<void>;
-	getStylesheet(resource:network.URL):nodes.Stylesheet;
+	getStylesheet(resource:URI):nodes.Stylesheet;
 }
 
 class PromiseWithTrigger<T> extends winjs.TPromise<T> {
@@ -110,20 +109,20 @@ export class CSSLanguageService implements ILanguageService {
 	}
 
 	public join():winjs.TPromise<void> {
-		return (this.activeDelay || winjs.Promise.as(null));
+		return (this.activeDelay || winjs.TPromise.as(null));
 	}
 
 	private _isMyMirrorModel(resource:EditorCommon.IMirrorModel): boolean {
 		return resource.getMode().getId() === this._cssModeId;
 	}
 
-	private _isMyModel(url:network.URL): boolean {
+	private _isMyModel(url:URI): boolean {
 		return this._isMyMirrorModel(this.resourceService.get(url));
 	}
 
 	private updateResources():void {
 
-		var t1 = new Date().getTime(), n = 0;
+		var n = 0;
 
 		this.resourceService.all().filter((element) => this._isMyMirrorModel(element)).forEach((model:EditorCommon.IMirrorModel) => {
 			// Reparse changes or new models
@@ -149,7 +148,7 @@ export class CSSLanguageService implements ILanguageService {
 //		console.info('[less] updating ' + n + ' resources took ms' + (new Date().getTime() - t1));
 	}
 
-	public getStylesheet(resource:network.URL):nodes.Stylesheet {
+	public getStylesheet(resource:URI):nodes.Stylesheet {
 		if(this.entries.hasOwnProperty(resource.toString())) {
 			return this.entries[resource.toString()].node;
 		}

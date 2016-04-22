@@ -9,27 +9,25 @@ import 'vs/css!./media/git.contribution';
 import nls = require('vs/nls');
 import async = require('vs/base/common/async');
 import errors = require('vs/base/common/errors');
-import actions = require('vs/base/common/actions');
+import paths = require('vs/base/common/paths');
 import lifecycle = require('vs/base/common/lifecycle');
-import Severity from 'vs/base/common/severity';
 import winjs = require('vs/base/common/winjs.base');
 import ext = require('vs/workbench/common/contributions');
 import git = require('vs/workbench/parts/git/common/git');
-import workbenchEvents = require('vs/workbench/browser/events');
+import workbenchEvents = require('vs/workbench/common/events');
 import common = require('vs/editor/common/editorCommon');
 import widget = require('vs/editor/browser/widget/codeEditorWidget');
 import viewlet = require('vs/workbench/browser/viewlet');
 import statusbar = require('vs/workbench/browser/parts/statusbar/statusbar');
 import platform = require('vs/platform/platform');
 import widgets = require('vs/workbench/parts/git/browser/gitWidgets');
-import wbar = require('vs/workbench/browser/actionRegistry');
+import wbar = require('vs/workbench/common/actionRegistry');
 import gitoutput = require('vs/workbench/parts/git/browser/gitOutput');
 import output = require('vs/workbench/parts/output/common/output');
 import {SyncActionDescriptor} from 'vs/platform/actions/common/actions';
 import {EditorBrowserRegistry} from 'vs/editor/browser/editorBrowserExtensions';
 import confregistry = require('vs/platform/configuration/common/configurationRegistry');
 import quickopen = require('vs/workbench/browser/quickopen');
-import {IQuickOpenService} from 'vs/workbench/services/quickopen/browser/quickOpenService';
 import editorcontrib = require('vs/workbench/parts/git/browser/gitEditorContributions');
 import {IActivityService, ProgressBadge, NumberBadge} from 'vs/workbench/services/activity/common/activityService';
 import {IEventService} from 'vs/platform/event/common/event';
@@ -39,6 +37,10 @@ import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
 import {IViewletService} from 'vs/workbench/services/viewlet/common/viewletService';
 import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
 import {KeyMod, KeyCode} from 'vs/base/common/keyCodes';
+import {IModelService} from 'vs/editor/common/services/modelService';
+import {RawText} from 'vs/editor/common/model/textModel';
+import {IEditorWorkerService} from 'vs/editor/common/services/editorWorkerService';
+import URI from 'vs/base/common/uri';
 
 import IGitService = git.IGitService;
 
@@ -99,11 +101,12 @@ export class StatusUpdater implements ext.IWorkbenchContribution
 	}
 
 	public dispose(): void {
-		this.toDispose = lifecycle.disposeAll(this.toDispose);
+		this.toDispose = lifecycle.dispose(this.toDispose);
 	}
 }
 
 class DirtyDiffModelDecorator {
+	static GIT_ORIGINAL_SCHEME = 'git-index';
 
 	static ID = 'Monaco.IDE.UI.Viewlets.GitViewlet.Editor.DirtyDiffDecorator';
 	static MODIFIED_DECORATION_OPTIONS: common.IModelDecorationOptions = {
@@ -134,35 +137,41 @@ class DirtyDiffModelDecorator {
 		}
 	};
 
+	private modelService: IModelService;
+	private editorWorkerService: IEditorWorkerService;
 	private editorService: IWorkbenchEditorService;
 	private contextService: IWorkspaceContextService;
 	private gitService: IGitService;
 
 	private model: common.IModel;
+	private _originalContentsURI: URI;
 	private path: string;
 	private decorations: string[];
-	private firstRun: boolean;
 
-	private delayer: async.ThrottledDelayer;
-	private diffDelayer: async.ThrottledDelayer;
+	private delayer: async.ThrottledDelayer<void>;
+	private diffDelayer: async.ThrottledDelayer<void>;
 	private toDispose: lifecycle.IDisposable[];
 
 	constructor(model: common.IModel, path: string,
+		@IModelService modelService: IModelService,
+		@IEditorWorkerService editorWorkerService: IEditorWorkerService,
 		@IWorkbenchEditorService editorService: IWorkbenchEditorService,
 		@IWorkspaceContextService contextService: IWorkspaceContextService,
 		@IGitService gitService: IGitService
 	) {
+		this.modelService = modelService;
+		this.editorWorkerService = editorWorkerService;
 		this.editorService = editorService;
 		this.contextService = contextService;
 		this.gitService = gitService;
 
 		this.model = model;
+		this._originalContentsURI = model.getAssociatedResource().withScheme(DirtyDiffModelDecorator.GIT_ORIGINAL_SCHEME);
 		this.path = path;
 		this.decorations = [];
-		this.firstRun = true;
 
-		this.delayer = new async.ThrottledDelayer(500);
-		this.diffDelayer = new async.ThrottledDelayer(200);
+		this.delayer = new async.ThrottledDelayer<void>(500);
+		this.diffDelayer = new async.ThrottledDelayer<void>(200);
 
 		this.toDispose = [];
 		this.toDispose.push(model.addListener2(common.EventType.ModelContentChanged, () => this.triggerDiff()));
@@ -195,23 +204,36 @@ class DirtyDiffModelDecorator {
 			.done(null, errors.onUnexpectedError);
 	}
 
-	private diffOriginalContents(): winjs.Promise {
+	private diffOriginalContents(): winjs.TPromise<void> {
 		return this.getOriginalContents()
 			.then(contents => {
 				if (!this.model || this.model.isDisposed()) {
 					return; // disposed
 				}
 
-				// return early if nothing has changed
-				if (!this.firstRun && this.model.getProperty('original') === contents) {
-					return winjs.Promise.as(null);
+				if (!contents) {
+					// untracked file
+					this.modelService.destroyModel(this._originalContentsURI);
+					return this.triggerDiff();
 				}
 
-				this.firstRun = false;
-				this.model.setProperty('original', contents);
+				let originalModel = this.modelService.getModel(this._originalContentsURI);
+				if (originalModel) {
+					let contentsRawText = RawText.fromStringWithModelOptions(contents, originalModel);
 
-				// wait a bit, for the 'original' property to propagate
-				return winjs.Promise.timeout(500).then(() =>  this.triggerDiff());
+					// return early if nothing has changed
+					if (originalModel.equals(contentsRawText)) {
+						return winjs.TPromise.as(null);
+					}
+
+					// we already have the original contents
+					originalModel.setValueFromRawText(contentsRawText);
+				} else {
+					// this is the first time we load the original contents
+					this.modelService.createModel(contents, null, this._originalContentsURI);
+				}
+
+				return this.triggerDiff();
 			});
 	}
 
@@ -223,19 +245,17 @@ class DirtyDiffModelDecorator {
 	}
 
 	private triggerDiff(): winjs.Promise {
+		if (!this.diffDelayer) {
+			return winjs.TPromise.as(null);
+		}
+
 		return this.diffDelayer.trigger(() => {
 			if (!this.model || this.model.isDisposed()) {
-				return winjs.Promise.as([]); // disposed
+				return winjs.TPromise.as<any>([]); // disposed
 			}
 
-			var mode = this.model.getMode(); // might be null
-
-			if (!mode || !mode.dirtyDiffSupport) {
-				return winjs.Promise.as([]);
-			}
-
-			return mode.dirtyDiffSupport.computeDirtyDiff(this.model.getAssociatedResource(), true);
-		}).then(diff => {
+			return this.editorWorkerService.computeDirtyDiff(this._originalContentsURI, this.model.getAssociatedResource(), true);
+		}).then((diff:common.IChange[]) => {
 			if (!this.model || this.model.isDisposed()) {
 				return; // disposed
 			}
@@ -283,14 +303,21 @@ class DirtyDiffModelDecorator {
 	}
 
 	public dispose(): void {
-		this.toDispose = lifecycle.disposeAll(this.toDispose);
+		this.modelService.destroyModel(this._originalContentsURI);
+		this.toDispose = lifecycle.dispose(this.toDispose);
 		if (this.model && !this.model.isDisposed()) {
 			this.model.deltaDecorations(this.decorations, []);
 		}
 		this.model = null;
 		this.decorations = null;
-		this.delayer.cancel();
-		this.diffDelayer.cancel();
+		if (this.delayer) {
+			this.delayer.cancel();
+			this.delayer = null;
+		}
+		if (this.diffDelayer) {
+			this.diffDelayer.cancel();
+			this.diffDelayer = null;
+		}
 	}
 }
 
@@ -325,6 +352,7 @@ export class DirtyDiffDecorator implements ext.IWorkbenchContribution {
 		this.decorators = Object.create(null);
 		this.toDispose = [];
 		this.toDispose.push(eventService.addListener2(workbenchEvents.EventType.EDITOR_INPUT_CHANGED, () => this.onEditorInputChange()));
+		this.toDispose.push(gitService.addListener2(git.ServiceEvents.DISPOSE, () => this.dispose()));
 	}
 
 	public getId(): string {
@@ -335,7 +363,19 @@ export class DirtyDiffDecorator implements ext.IWorkbenchContribution {
 		// HACK: This is the best current way of figuring out whether to draw these decorations
 		// or not. Needs context from the editor, to know whether it is a diff editor, in place editor
 		// etc.
-		var models = this.editorService.getVisibleEditors()
+
+		const repositoryRoot = this.gitService.getModel().getRepositoryRoot();
+
+		// If there is no repository root, just wait until that changes
+		if (typeof repositoryRoot !== 'string') {
+			this.gitService.addOneTimeListener(git.ServiceEvents.STATE_CHANGED, () => this.onEditorInputChange());
+
+			this.models.forEach(m => this.onModelInvisible(m));
+			this.models = [];
+			return;
+		}
+
+		const models = this.editorService.getVisibleEditors()
 
 			// map to the editor controls
 			.map(e => e.getControl())
@@ -354,12 +394,12 @@ export class DirtyDiffDecorator implements ext.IWorkbenchContribution {
 
 			// remove nulls
 			.filter(p => !!p.resource &&
-				// and ivalid resources
-				(p.resource.scheme === 'file' && !!this.contextService.isInsideWorkspace(p.resource))
+				// and invalid resources
+				(p.resource.scheme === 'file' && paths.isEqualOrParent(p.resource.fsPath, repositoryRoot))
 			)
 
 			// get paths
-			.map(p => ({ model: p.model, path: this.contextService.toWorkspaceRelativePath(p.resource) }))
+			.map(p => ({ model: p.model, path: paths.normalize(paths.relative(repositoryRoot, p.resource.fsPath)) }))
 
 			// remove nulls and inside .git files
 			.filter(p => !!p.path && p.path.indexOf('.git/') === -1);
@@ -383,6 +423,7 @@ export class DirtyDiffDecorator implements ext.IWorkbenchContribution {
 	}
 
 	public dispose(): void {
+		this.toDispose = lifecycle.dispose(this.toDispose);
 		this.models.forEach(m => this.decorators[m.id].dispose());
 		this.models = null;
 		this.decorators = null;
@@ -400,23 +441,6 @@ class OpenGitViewletAction extends viewlet.ToggleViewletAction {
 	}
 }
 
-class GitCommandsAction extends actions.Action {
-
-	public static ID = 'workbench.action.git.executeGitCommands';
-	public static LABEL = nls.localize('executeGitCommands', "Execute Git Commands");
-	private quickOpenService: IQuickOpenService;
-
-	constructor(id: string, label: string, @IQuickOpenService quickOpenService: IQuickOpenService) {
-		super(id, label);
-		this.quickOpenService = quickOpenService;
-	}
-
-	public run(event?:any): winjs.Promise {
-		this.quickOpenService.show('git ');
-		return winjs.Promise.as(null);
-	}
-}
-
 export function registerContributions(): void {
 
 	// Register Statusbar item
@@ -428,7 +452,7 @@ export function registerContributions(): void {
 
 	// Register Output Channel
 	var outputChannelRegistry = <output.IOutputChannelRegistry>platform.Registry.as(output.Extensions.OutputChannels);
-	outputChannelRegistry.registerChannel('Git');
+	outputChannelRegistry.registerChannel('Git', nls.localize('git', "Git"));
 
 	// Register Git Output
 	(<ext.IWorkbenchContributionsRegistry>platform.Registry.as(ext.Extensions.Workbench)).registerWorkbenchContribution(
@@ -436,7 +460,7 @@ export function registerContributions(): void {
 	);
 
 	// Register Viewlet
-	(<viewlet.IViewletRegistry>platform.Registry.as(viewlet.Extensions.Viewlets)).registerViewlet(new viewlet.ViewletDescriptor(
+	(<viewlet.ViewletRegistry>platform.Registry.as(viewlet.Extensions.Viewlets)).registerViewlet(new viewlet.ViewletDescriptor(
 		'vs/workbench/parts/git/browser/gitViewlet',
 		'GitViewlet',
 		VIEWLET_ID,
@@ -450,14 +474,11 @@ export function registerContributions(): void {
 		new SyncActionDescriptor(OpenGitViewletAction, OpenGitViewletAction.ID, OpenGitViewletAction.LABEL, {
 			primary: null,
 			win: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_G },
-			linux: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_G }
+			linux: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_G },
+			mac: { primary: KeyMod.WinCtrl | KeyMod.Shift | KeyCode.KEY_G }
 		}),
+		'Show Git',
 		nls.localize('view', "View")
-	);
-
-	// Register Action for git quick open mode
-	(<wbar.IWorkbenchActionRegistry> platform.Registry.as(wbar.Extensions.WorkbenchActions)).registerWorkbenchAction(
-		new SyncActionDescriptor(GitCommandsAction, GitCommandsAction.ID, GitCommandsAction.LABEL)
 	);
 
 	// Register MergeDecorator
@@ -491,17 +512,17 @@ export function registerContributions(): void {
 		title: nls.localize('gitConfigurationTitle', "Git configuration"),
 		type: 'object',
 		properties: {
-			"git.enabled": {
+			'git.enabled': {
 				type: 'boolean',
 				description: nls.localize('gitEnabled', "Is git enabled"),
 				default: true
 			},
-			"git.path": {
-				type: 'string',
+			'git.path': {
+				type: ['string', 'null'],
 				description: nls.localize('gitPath', "Path to the git executable"),
 				default: null
 			},
-			"git.autofetch": {
+			'git.autofetch': {
 				type: 'boolean',
 				description: nls.localize('gitAutoFetch', "Whether auto fetching is enabled."),
 				default: true

@@ -1,8 +1,9 @@
-/* --------------------------------------------------------------------------------------------
- * Copyright (c) Microsoft Corporation. All rights reserved.
- * Licensed under the MIT License. See License.txt in the project root for license information.
- * ------------------------------------------------------------------------------------------ */
- 'use strict';
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+'use strict';
 
 import { workspace, TextDocument, TextDocumentChangeEvent, TextDocumentContentChangeEvent, Disposable } from 'vscode';
 import * as Proto from '../protocol';
@@ -20,8 +21,8 @@ class SyncedBuffer {
 	private diagnosticRequestor: IDiagnosticRequestor;
 	private client: ITypescriptServiceClient;
 
-	constructor(model: TextDocument, filepath: string, diagnosticRequestor: IDiagnosticRequestor, client: ITypescriptServiceClient) {
-		this.document = model;
+	constructor(document: TextDocument, filepath: string, diagnosticRequestor: IDiagnosticRequestor, client: ITypescriptServiceClient) {
+		this.document = document;
 		this.filepath = filepath;
 		this.diagnosticRequestor = diagnosticRequestor;
 		this.client = client;
@@ -29,26 +30,10 @@ class SyncedBuffer {
 
 	public open(): void {
 		let args: Proto.OpenRequestArgs = {
-			file: this.filepath
+			file: this.filepath,
+			fileContent: this.document.getText()
 		};
 		this.client.execute('open', args, false);
-		// The last line never has a new line character at the end. So we use range.
-		// Sending a replace doesn't work if the buffer is newer then on disk and
-		// if changes are on the last line. In this case the tsserver has less characters
-		// which makes the tsserver bail since the range is invalid
-		/*
-		let lastLineRange = this.document.lineAt(this.document.lineCount - 1).range;
-		let text = this.document.getText();
-		let changeArgs: Proto.ChangeRequestArgs = {
-			file: this.filepath,
-			line: 1,
-			offset: 1,
-			endLine: lastLineRange.end.line + 1,
-			endOffset: lastLineRange.end.character + 1,
-			insertString: text
-		}
-		this.client.execute('change', changeArgs, false);
-		*/
 	}
 
 	public close(): void {
@@ -86,31 +71,49 @@ export default class BufferSyncSupport {
 
 	private client: ITypescriptServiceClient;
 
-	private modeId: string;
+	private _validate: boolean;
+	private modeIds: Map<boolean>;
 	private disposables: Disposable[] = [];
 	private syncedBuffers: { [key: string]: SyncedBuffer };
 
 	private pendingDiagnostics: { [key: string]: number; };
 	private diagnosticDelayer: Delayer<any>;
 
-	constructor(client: ITypescriptServiceClient, modeId: string) {
+	constructor(client: ITypescriptServiceClient, modeIds: string[], validate: boolean = true) {
 		this.client = client;
-		this.modeId = modeId;
+		this.modeIds = Object.create(null);
+		modeIds.forEach(modeId => this.modeIds[modeId] = true);
+		this._validate = validate;
 
 		this.pendingDiagnostics = Object.create(null);
 		this.diagnosticDelayer = new Delayer<any>(100);
 
 		this.syncedBuffers = Object.create(null);
+	}
+
+	public listen(): void {
 		workspace.onDidOpenTextDocument(this.onDidAddDocument, this, this.disposables);
 		workspace.onDidCloseTextDocument(this.onDidRemoveDocument, this, this.disposables);
 		workspace.onDidChangeTextDocument(this.onDidChangeDocument, this, this.disposables);
 		workspace.textDocuments.forEach(this.onDidAddDocument, this);
 	}
 
+	public get validate(): boolean {
+		return this._validate;
+	}
+
+	public set validate(value: boolean) {
+		this._validate = value;
+	}
+
+	public handles(file: string): boolean {
+		return !!this.syncedBuffers[file];
+	}
+
 	public reOpenDocuments(): void {
 		Object.keys(this.syncedBuffers).forEach(key => {
 			this.syncedBuffers[key].open();
-		})
+		});
 	}
 
 	public dispose(): void {
@@ -120,7 +123,7 @@ export default class BufferSyncSupport {
 	}
 
 	private onDidAddDocument(document: TextDocument): void {
-		if (document.languageId !== this.modeId) {
+		if (!this.modeIds[document.languageId]) {
 			return;
 		}
 		if (document.isUntitled) {
@@ -163,6 +166,9 @@ export default class BufferSyncSupport {
 	}
 
 	public requestAllDiagnostics() {
+		if (!this._validate) {
+			return;
+		}
 		Object.keys(this.syncedBuffers).forEach(filePath => this.pendingDiagnostics[filePath] = Date.now());
 		this.diagnosticDelayer.trigger(() => {
 			this.sendPendingDiagnostics();
@@ -170,6 +176,9 @@ export default class BufferSyncSupport {
 	}
 
 	public requestDiagnostic(file: string): void {
+		if (!this._validate) {
+			return;
+		}
 		this.pendingDiagnostics[file] = Date.now();
 		this.diagnosticDelayer.trigger(() => {
 			this.sendPendingDiagnostics();
@@ -177,6 +186,9 @@ export default class BufferSyncSupport {
 	}
 
 	private sendPendingDiagnostics(): void {
+		if (!this._validate) {
+			return;
+		}
 		let files = Object.keys(this.pendingDiagnostics).map((key) => {
 			return {
 				file: key,

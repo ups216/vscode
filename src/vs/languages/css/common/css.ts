@@ -5,20 +5,23 @@
 'use strict';
 
 import WinJS = require('vs/base/common/winjs.base');
-import supports = require('vs/editor/common/modes/supports');
 import objects = require('vs/base/common/objects');
-import Network = require('vs/base/common/network');
+import URI from 'vs/base/common/uri';
 import EditorCommon = require('vs/editor/common/editorCommon');
 import Modes = require('vs/editor/common/modes');
-import {OneWorkerAttr} from 'vs/platform/thread/common/threadService';
+import {OneWorkerAttr, AllWorkersAttr} from 'vs/platform/thread/common/threadService';
 import cssWorker = require('vs/languages/css/common/cssWorker');
-import {AbstractMode} from 'vs/editor/common/modes/abstractMode';
+import cssTokenTypes = require('vs/languages/css/common/cssTokenTypes');
+import {AbstractMode, ModeWorkerManager} from 'vs/editor/common/modes/abstractMode';
 import {AbstractState} from 'vs/editor/common/modes/abstractState';
-import {AsyncDescriptor2, createAsyncDescriptor2} from 'vs/platform/instantiation/common/descriptors';
 import {IMarker} from 'vs/platform/markers/common/markers';
-import {OnEnterSupport} from 'vs/editor/common/modes/supports/onEnter';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
-import {IThreadService} from 'vs/platform/thread/common/thread';
+import {IThreadService, ThreadAffinity} from 'vs/platform/thread/common/thread';
+import {RichEditSupport} from 'vs/editor/common/modes/supports/richEditSupport';
+import {TokenizationSupport} from 'vs/editor/common/modes/supports/tokenizationSupport';
+import {DeclarationSupport} from 'vs/editor/common/modes/supports/declarationSupport';
+import {ReferenceSupport} from 'vs/editor/common/modes/supports/referenceSupport';
+import {SuggestSupport} from 'vs/editor/common/modes/supports/suggestSupport';
 
 export enum States {
 	Selector,
@@ -31,6 +34,8 @@ export enum States {
 	MetaPostUrl,
 	MetaInUrlFunction,
 }
+
+export { cssTokenTypes };
 
 var identRegEx = /^-?-?([a-zA-Z]|(\\(([0-9a-fA-F]{1,6}\s?)|[^[0-9a-fA-F])))([\w\-]|(\\(([0-9a-fA-F]{1,6}\s?)|[^[0-9a-fA-F])))*/;
 
@@ -131,13 +136,13 @@ export class State extends AbstractState {
 		switch (this.kind) {
 			case States.ValuePostUrl:
 				if (ch === '(') {
-					return this.nextState(States.ValueInUrlFunction, { type:'punctuation.parenthesis.css', bracket: Modes.Bracket.Open });
+					return this.nextState(States.ValueInUrlFunction, { type: 'punctuation.parenthesis.css' });
 				}
 				this.kind = States.Value;
 				break;
 			case States.MetaPostUrl:
 				if (ch === '(') {
-					return this.nextState(States.MetaInUrlFunction, { type:'punctuation.parenthesis.css', bracket: Modes.Bracket.Open });
+					return this.nextState(States.MetaInUrlFunction, { type: 'punctuation.parenthesis.css' });
 				}
 				this.kind = States.Meta;
 				break;
@@ -155,32 +160,32 @@ export class State extends AbstractState {
 		switch (this.kind) {
 			case States.Selector:
 				if (ch === '{') {
-					return this.nextState(States.Rule, { type:'punctuation.bracket.css', bracket: Modes.Bracket.Open });
+					return this.nextState(States.Rule, { type: 'punctuation.bracket.css' });
 				}
 				if (ch === '(' || ch === ')') {
-					return { type:'punctuation.parenthesis.css', bracket: ch === '(' ? Modes.Bracket.Open : Modes.Bracket.Close };
+					return { type: 'punctuation.parenthesis.css' };
 				}
 				if (ch === '@' && !this.inMeta) {  //@import, @media, @key-word-animation
 					stream.advanceIfRegExp2(identRegEx);
-					return this.nextState(States.Meta, { type:'keyword.css' });
+					return this.nextState(States.Meta, { type: cssTokenTypes.TOKEN_AT_KEYWORD + '.css' });
 				}
 				if (ch === '}' && this.inMeta) {  //@import, @media, @key-word-animation
 					this.inMeta = false;
-					return this.nextState(States.Selector, { type:'punctuation.bracket.css', bracket: Modes.Bracket.Close });
+					return this.nextState(States.Selector, { type: 'punctuation.bracket.css' });
 				}
 				if (/[\*\(\)\[\]\+>=\~\|;]/.test(ch)) {
-					return { type:'punctuation.css' };
+					return { type: 'punctuation.css' };
 				}
 				if (ch === '#') {
 					stream.advanceIfRegExp2(identRegEx);
-					return { type:'entity.other.attribute-name.id.css' };
+					return { type: cssTokenTypes.TOKEN_SELECTOR + '.id.css' };
 				}
 				if (ch === '.') {
 					stream.advanceIfRegExp2(identRegEx);
-					return { type:'entity.other.attribute-name.class.css' };
+					return { type: cssTokenTypes.TOKEN_SELECTOR + '.class.css' };
 				}
 				this.consumeIdent(stream);
-				return { type:'entity.name.tag.css' };
+				return { type: cssTokenTypes.TOKEN_SELECTOR_TAG + '.css' };
 
 			case States.Meta:
 				if (ch === '{') {
@@ -188,74 +193,74 @@ export class State extends AbstractState {
 					if (this.inMeta) {
 						nextState = States.Selector;
 					}
-					return this.nextState(nextState, { type:'punctuation.bracket.css', bracket: Modes.Bracket.Open });
+					return this.nextState(nextState, { type: 'punctuation.bracket.css' });
 				}
 				if (ch === '(' || ch === ')') {
-					return { type:'punctuation.parenthesis.css', bracket: ch === '(' ? Modes.Bracket.Open : Modes.Bracket.Close };
+					return { type: 'punctuation.parenthesis.css' };
 				}
 				if (ch === ';') {
 					if (this.metaBraceCount === 0) {
 						this.inMeta = false;
 					}
-					return this.nextState(States.Selector, { type:'punctuation.css' });
+					return this.nextState(States.Selector, { type: 'punctuation.css' });
 				}
 				if ((ch === 'u' || ch === 'U') && stream.advanceIfStringCaseInsensitive2('rl')) {
 					stream.advanceIfStringCaseInsensitive2('-prefix'); // support 'url-prefix' (part of @-mox-document)
-					return this.nextState(States.MetaPostUrl, { type:'meta.property-value.css' });
+					return this.nextState(States.MetaPostUrl, { type: cssTokenTypes.TOKEN_VALUE + '.css' });
 				}
 				if (/[\*\(\)\[\]\+>=\~\|]/.test(ch)) {
-					return { type:'punctuation.css' };
+					return { type: 'punctuation.css' };
 				}
 				this.inMeta = true;
 				this.consumeIdent(stream);
-				return { type:'meta.property-value.css' };
+				return { type: cssTokenTypes.TOKEN_VALUE + '.css' };
 
 			case States.Rule:
 				if (ch === '}') {
-					return this.nextState(States.Selector, { type:'punctuation.bracket.css', bracket: Modes.Bracket.Close });
+					return this.nextState(States.Selector, { type: 'punctuation.bracket.css' });
 				}
 				if (ch === ':') {
-					return this.nextState(States.Value, { type:'punctuation.css' });
+					return this.nextState(States.Value, { type: 'punctuation.css' });
 				}
 				if (ch === '(' || ch === ')') {
-					return { type:'punctuation.parenthesis.css', bracket: ch === '(' ? Modes.Bracket.Open : Modes.Bracket.Close };
+					return { type: 'punctuation.parenthesis.css' };
 				}
 				this.consumeIdent(stream);
-				return { type:'support.type.property-name.css' };
+				return { type: cssTokenTypes.TOKEN_PROPERTY + '.css' };
 
 			case States.Value:
 				if (ch === '}') {
-					return this.nextState(States.Selector, { type:'punctuation.bracket.css', bracket: Modes.Bracket.Close });
+					return this.nextState(States.Selector, { type: 'punctuation.bracket.css' });
 				}
 				if (ch === ';') {
-					return this.nextState(States.Rule, { type:'punctuation.css' });
+					return this.nextState(States.Rule, { type: 'punctuation.css' });
 				}
 				if ((ch === 'u' || ch === 'U') && stream.advanceIfStringCaseInsensitive2('rl')) {
-					return this.nextState(States.ValuePostUrl, { type:'meta.property-value.css' });
+					return this.nextState(States.ValuePostUrl, { type: cssTokenTypes.TOKEN_VALUE + '.css' });
 				}
 
 				if (ch === '(' || ch === ')') {
-					return { type:'punctuation.parenthesis.css', bracket: ch === '(' ? Modes.Bracket.Open : Modes.Bracket.Close };
+					return { type: 'punctuation.parenthesis.css' };
 				}
 				if (ch === ',') {
-					return { type:'punctuation.css' };
+					return { type: 'punctuation.css' };
 				}
 				if (ch === '#') {
 					stream.advanceIfRegExp2(/^[\w]*/);
-					return { type:'meta.property-value.hex.css' };
+					return { type: cssTokenTypes.TOKEN_VALUE + '.hex.css' };
 				}
 				if (/\d/.test(ch) || (/-|\+/.test(ch) && !stream.eos() && /\d/.test(stream.peek()))) {
 					stream.advanceIfRegExp2(/^[\d\.]*/);
-					return this.nextState(States.Unit, { type:'meta.property-value.numeric.css' });
+					return this.nextState(States.Unit, { type: cssTokenTypes.TOKEN_VALUE + '.numeric.css' });
 				}
 				if (ch === '!') {
-					return { type:'meta.property-value.keyword.css' };  // !
+					return { type: cssTokenTypes.TOKEN_VALUE + '.keyword.css' };  // !
 				}
 				if ((ch === 'i' || ch === 'I') && stream.advanceIfStringCaseInsensitive2('mportant')) {
-					return { type:'meta.property-value.keyword.css' };  // important
+					return { type: cssTokenTypes.TOKEN_VALUE + '.keyword.css' };  // important
 				}
 				if (this.consumeIdent(stream)) {
-					return { type:'meta.property-value.css' };
+					return { type: cssTokenTypes.TOKEN_VALUE + '.css' };
 				}
 				break;
 
@@ -263,7 +268,7 @@ export class State extends AbstractState {
 				// css units - see: http://www.w3.org/TR/css3-values/#font-relative-lengths
 				stream.goBack(1);
 				if(stream.advanceIfRegExp2(/^(em|ex|ch|rem|vw|vh|vm|cm|mm|in|px|pt|pc|deg|grad|rad|turn|s|ms|Hz|kHz|%)/)) {
-					return { type:'meta.property-value.unit.css' };
+					return { type: cssTokenTypes.TOKEN_VALUE + '.unit.css' };
 				}
 				// no unit, back to value state
 				this.nextState(States.Value, null);
@@ -273,120 +278,165 @@ export class State extends AbstractState {
 	}
 }
 
-export class CSSMode extends AbstractMode<cssWorker.CSSWorker> {
+export class CSSMode extends AbstractMode {
 
 	public tokenizationSupport: Modes.ITokenizationSupport;
-	public electricCharacterSupport: Modes.IElectricCharacterSupport;
-	public characterPairSupport: Modes.ICharacterPairSupport;
-
+	public richEditSupport: Modes.IRichEditSupport;
+	public inplaceReplaceSupport:Modes.IInplaceReplaceSupport;
+	public configSupport:Modes.IConfigurationSupport;
 	public referenceSupport: Modes.IReferenceSupport;
 	public logicalSelectionSupport: Modes.ILogicalSelectionSupport;
 	public extraInfoSupport:Modes.IExtraInfoSupport;
+	public occurrencesSupport:Modes.IOccurrencesSupport;
 	public outlineSupport: Modes.IOutlineSupport;
 	public declarationSupport: Modes.IDeclarationSupport;
 	public suggestSupport: Modes.ISuggestSupport;
 	public quickFixSupport: Modes.IQuickFixSupport;
-	public onEnterSupport: Modes.IOnEnterSupport;
+
+	private _modeWorkerManager: ModeWorkerManager<cssWorker.CSSWorker>;
+	private _threadService:IThreadService;
 
 	constructor(
 		descriptor:Modes.IModeDescriptor,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IThreadService threadService: IThreadService
 	) {
-		super(descriptor, instantiationService, threadService);
+		super(descriptor.id);
+		this._modeWorkerManager = new ModeWorkerManager<cssWorker.CSSWorker>(descriptor, 'vs/languages/css/common/cssWorker', 'CSSWorker', null, instantiationService);
+		this._threadService = threadService;
 
-		this.tokenizationSupport = new supports.TokenizationSupport(this, {
+		this.tokenizationSupport = new TokenizationSupport(this, {
 			getInitialState: () => new State(this, States.Selector, false, null, false, 0)
 		}, false, false);
-		this.electricCharacterSupport = new supports.BracketElectricCharacterSupport(this, { brackets: [
-			{ tokenType:'punctuation.bracket.css', open: '{', close: '}', isElectric: true }
-		] });
 
-		this.extraInfoSupport = this;
-		this.referenceSupport = new supports.ReferenceSupport(this, {
-			tokens: ['support.type.property-name.css', 'meta.property-value.css', 'entity.name.tag.css'],
-			findReferences: (resource, position, /*unused*/includeDeclaration) => this.findReferences(resource, position)});
-		this.logicalSelectionSupport = this;
-		this.outlineSupport = this;
-		this.declarationSupport = new supports.DeclarationSupport(this, {
-			tokens: ['meta.property-value.css'],
-			findDeclaration: (resource, position) => this.findDeclaration(resource, position)});
+		this.richEditSupport = new RichEditSupport(this.getId(), null, {
+			// TODO@Martin: This definition does not work with umlauts for example
+			wordPattern: /(#?-?\d*\.\d\w*%?)|((::|[@#.!:])?[\w-?]+%?)|::|[@#.!:]/g,
 
-		this.characterPairSupport = new supports.CharacterPairSupport(this, {
-			autoClosingPairs:
-				[	{ open: '{', close: '}' },
+			comments: {
+				blockComment: ['/*', '*/']
+			},
+
+			brackets: [
+				['{', '}'],
+				['[', ']'],
+				['(', ')']
+			],
+
+			__characterPairSupport: {
+				autoClosingPairs: [
+					{ open: '{', close: '}' },
 					{ open: '[', close: ']' },
 					{ open: '(', close: ')' },
 					{ open: '"', close: '"', notIn: ['string'] },
 					{ open: '\'', close: '\'', notIn: ['string'] }
-				]});
+				]
+			}
+		});
 
-		this.suggestSupport = new supports.SuggestSupport(this, {
+		this.inplaceReplaceSupport = this;
+		this.configSupport = this;
+		this.occurrencesSupport = this;
+		this.extraInfoSupport = this;
+		this.referenceSupport = new ReferenceSupport(this.getId(), {
+			tokens: [cssTokenTypes.TOKEN_PROPERTY + '.css', cssTokenTypes.TOKEN_VALUE + '.css', cssTokenTypes.TOKEN_SELECTOR_TAG + '.css'],
+			findReferences: (resource, position, /*unused*/includeDeclaration) => this.findReferences(resource, position)});
+		this.logicalSelectionSupport = this;
+		this.outlineSupport = this;
+		this.declarationSupport = new DeclarationSupport(this.getId(), {
+			tokens: [cssTokenTypes.TOKEN_VALUE + '.css'],
+			findDeclaration: (resource, position) => this.findDeclaration(resource, position)});
+
+		this.suggestSupport = new SuggestSupport(this.getId(), {
 			triggerCharacters: [' ', ':'],
 			excludeTokens: ['comment.css', 'string.css'],
 			suggest: (resource, position) => this.suggest(resource, position)});
 
-		this.onEnterSupport = new OnEnterSupport(this.getId(), {
-			brackets: [
-				{ open: '(', close: ')' },
-				{ open: '{', close: '}' },
-				{ open: '[', close: ']' }
-			]
-		});
 
 		this.quickFixSupport = this;
 	}
 
-	protected _getWorkerDescriptor(): AsyncDescriptor2<Modes.IMode, Modes.IWorkerParticipant[], cssWorker.CSSWorker> {
-		return createAsyncDescriptor2('vs/languages/css/common/cssWorker', 'CSSWorker');
+	public creationDone(): void {
+		if (this._threadService.isInMainThread) {
+			// Pick a worker to do validation
+			this._pickAWorkerToValidate();
+		}
+	}
+
+	private _worker<T>(runner:(worker:cssWorker.CSSWorker)=>WinJS.TPromise<T>): WinJS.TPromise<T> {
+		return this._modeWorkerManager.worker(runner);
+	}
+
+	public configure(options:any): WinJS.TPromise<void> {
+		if (this._threadService.isInMainThread) {
+			return this._configureWorkers(options);
+		} else {
+			return this._worker((w) => w._doConfigure(options));
+		}
+	}
+
+	static $_configureWorkers = AllWorkersAttr(CSSMode, CSSMode.prototype._configureWorkers);
+	private _configureWorkers(options:any): WinJS.TPromise<void> {
+		return this._worker((w) => w._doConfigure(options));
+	}
+
+	static $navigateValueSet = OneWorkerAttr(CSSMode, CSSMode.prototype.navigateValueSet);
+	public navigateValueSet(resource:URI, position:EditorCommon.IRange, up:boolean):WinJS.TPromise<Modes.IInplaceReplaceSupportResult> {
+		return this._worker((w) => w.navigateValueSet(resource, position, up));
+	}
+
+	static $_pickAWorkerToValidate = OneWorkerAttr(CSSMode, CSSMode.prototype._pickAWorkerToValidate, ThreadAffinity.Group1);
+	private _pickAWorkerToValidate(): WinJS.TPromise<void> {
+		return this._worker((w) => w.enableValidator());
+	}
+
+	static $findOccurrences = OneWorkerAttr(CSSMode, CSSMode.prototype.findOccurrences);
+	public findOccurrences(resource:URI, position:EditorCommon.IPosition, strict:boolean = false): WinJS.TPromise<Modes.IOccurence[]> {
+		return this._worker((w) => w.findOccurrences(resource, position, strict));
+	}
+
+	static $suggest = OneWorkerAttr(CSSMode, CSSMode.prototype.suggest);
+	public suggest(resource:URI, position:EditorCommon.IPosition):WinJS.TPromise<Modes.ISuggestResult[]> {
+		return this._worker((w) => w.suggest(resource, position));
 	}
 
 	static $findDeclaration = OneWorkerAttr(CSSMode, CSSMode.prototype.findDeclaration);
-	public findDeclaration(resource:Network.URL, position:EditorCommon.IPosition):WinJS.TPromise<Modes.IReference> {
+	public findDeclaration(resource:URI, position:EditorCommon.IPosition):WinJS.TPromise<Modes.IReference> {
 		return this._worker((w) => w.findDeclaration(resource, position));
 	}
 
 	static $computeInfo = OneWorkerAttr(CSSMode, CSSMode.prototype.computeInfo);
-	public computeInfo(resource:Network.URL, position:EditorCommon.IPosition): WinJS.TPromise<Modes.IComputeExtraInfoResult> {
+	public computeInfo(resource:URI, position:EditorCommon.IPosition): WinJS.TPromise<Modes.IComputeExtraInfoResult> {
 		return this._worker((w) => w.computeInfo(resource, position));
 	}
 
 	static $findReferences = OneWorkerAttr(CSSMode, CSSMode.prototype.findReferences);
-	public findReferences(resource:Network.URL, position:EditorCommon.IPosition):WinJS.TPromise<Modes.IReference[]> {
+	public findReferences(resource:URI, position:EditorCommon.IPosition):WinJS.TPromise<Modes.IReference[]> {
 		return this._worker((w) => w.findReferences(resource, position));
 	}
 
 	static $getRangesToPosition = OneWorkerAttr(CSSMode, CSSMode.prototype.getRangesToPosition);
-	public getRangesToPosition(resource:Network.URL, position:EditorCommon.IPosition):WinJS.TPromise<Modes.ILogicalSelectionEntry[]> {
+	public getRangesToPosition(resource:URI, position:EditorCommon.IPosition):WinJS.TPromise<Modes.ILogicalSelectionEntry[]> {
 		return this._worker((w) => w.getRangesToPosition(resource, position));
 	}
 
 	static $getOutline = OneWorkerAttr(CSSMode, CSSMode.prototype.getOutline);
-	public getOutline(resource:Network.URL):WinJS.TPromise<Modes.IOutlineEntry[]> {
+	public getOutline(resource:URI):WinJS.TPromise<Modes.IOutlineEntry[]> {
 		return this._worker((w) => w.getOutline(resource));
 	}
 
-	public getCommentsConfiguration():Modes.ICommentsConfiguration {
-		return { blockCommentStartToken: '/*', blockCommentEndToken: '*/' };
-	}
-
-	// TODO@Martin: This definition does not work with umlauts for example
-	public getWordDefinition():RegExp {
-		return /(#?-?\d*\.\d\w*%?)|((::|[@#.!:])?[\w-?]+%?)|::|[@#.!:]/g;
-	}
-
 	static $findColorDeclarations = OneWorkerAttr(CSSMode, CSSMode.prototype.findColorDeclarations);
-	public findColorDeclarations(resource:Network.URL):WinJS.TPromise<{range:EditorCommon.IRange; value:string; }[]> {
+	public findColorDeclarations(resource:URI):WinJS.TPromise<{range:EditorCommon.IRange; value:string; }[]> {
 		return this._worker((w) => w.findColorDeclarations(resource));
 	}
 
 	static getQuickFixes = OneWorkerAttr(CSSMode, CSSMode.prototype.getQuickFixes);
-	public getQuickFixes(resource: Network.URL, marker: IMarker | EditorCommon.IRange): WinJS.TPromise<Modes.IQuickFix[]>{
+	public getQuickFixes(resource: URI, marker: IMarker | EditorCommon.IRange): WinJS.TPromise<Modes.IQuickFix[]>{
 		return this._worker((w) => w.getQuickFixes(resource, marker));
 	}
 
 	static runQuickFixAction = OneWorkerAttr(CSSMode, CSSMode.prototype.runQuickFixAction);
-	public runQuickFixAction(resource:Network.URL, range:EditorCommon.IRange, id: any):WinJS.TPromise<Modes.IQuickFixResult>{
+	public runQuickFixAction(resource:URI, range:EditorCommon.IRange, id: any):WinJS.TPromise<Modes.IQuickFixResult>{
 		return this._worker((w) => w.runQuickFixAction(resource, range, id));
 	}
 }

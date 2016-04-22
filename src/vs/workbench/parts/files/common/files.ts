@@ -5,17 +5,16 @@
 'use strict';
 
 import {TPromise} from 'vs/base/common/winjs.base';
-import {Event, PropertyChangeEvent} from 'vs/base/common/events';
+import {Event as BaseEvent, PropertyChangeEvent} from 'vs/base/common/events';
 import URI from 'vs/base/common/uri';
+import Event from 'vs/base/common/event';
 import {guessMimeTypes} from 'vs/base/common/mime';
-import {EventProvider} from 'vs/base/common/eventProvider';
 import {IModel, IEditorOptions} from 'vs/editor/common/editorCommon';
 import {IDisposable} from 'vs/base/common/lifecycle';
 import {EncodingMode, EditorInput, IFileEditorInput} from 'vs/workbench/common/editor';
-import {IFileStat, FileChangesEvent, IFilesConfiguration} from 'vs/platform/files/common/files';
+import {IFileStat, IFilesConfiguration} from 'vs/platform/files/common/files';
 import {createDecorator, ServiceIdentifier} from 'vs/platform/instantiation/common/instantiation';
-import {ISearchService} from 'vs/platform/search/common/search';
-import {FileStat} from 'vs/workbench/parts/files/browser/views/explorerViewModel';
+import {FileStat} from 'vs/workbench/parts/files/common/explorerViewModel';
 
 /**
  * Explorer viewlet id.
@@ -68,6 +67,7 @@ export interface IFilesConfiguration extends IFilesConfiguration {
 			maxVisible: number;
 			dynamicHeight: boolean;
 		};
+		autoReveal: boolean;
 	};
 	editor: IEditorOptions;
 }
@@ -79,9 +79,9 @@ export interface IWorkingFileModelChangeEvent {
 
 export interface IWorkingFilesModel {
 
-	onModelChange: EventProvider<(event: IWorkingFileModelChangeEvent) => void>;
+	onModelChange: Event<IWorkingFileModelChangeEvent>;
 
-	onWorkingFileChange: EventProvider<(file: IWorkingFileEntry) => void>;
+	onWorkingFileChange: Event<IWorkingFileEntry>;
 
 	getEntries(excludeOutOfContext?: boolean): IWorkingFileEntry[];
 
@@ -104,6 +104,8 @@ export interface IWorkingFilesModel {
 	removeEntry(resource: URI): IWorkingFileEntry;
 	removeEntry(entry: IWorkingFileEntry): IWorkingFileEntry;
 	removeEntry(arg1: IWorkingFileEntry | URI): IWorkingFileEntry;
+
+	popLastClosedEntry(): IWorkingFileEntry;
 
 	reorder(source: IWorkingFileEntry, target: IWorkingFileEntry): void;
 
@@ -198,7 +200,7 @@ export const EventType = {
  */
 export class LocalFileChangeEvent extends PropertyChangeEvent {
 
-	constructor(before?: IFileStat, after?: IFileStat, originalEvent?: Event) {
+	constructor(before?: IFileStat, after?: IFileStat, originalEvent?: BaseEvent) {
 		super(null, before, after, originalEvent);
 	}
 
@@ -250,8 +252,9 @@ export class LocalFileChangeEvent extends PropertyChangeEvent {
  */
 export class TextFileChangeEvent extends LocalFileChangeEvent {
 	private _model: IModel;
+	private _isAutoSaved: boolean;
 
-	constructor(model: IModel, before: IFileStat, after: IFileStat = before, originalEvent?: Event) {
+	constructor(model: IModel, before: IFileStat, after: IFileStat = before, originalEvent?: BaseEvent) {
 		super(before, after, originalEvent);
 
 		this._model = model;
@@ -259,6 +262,14 @@ export class TextFileChangeEvent extends LocalFileChangeEvent {
 
 	public get model(): IModel {
 		return this._model;
+	}
+
+	public setAutoSaved(autoSaved: boolean): void {
+		this._isAutoSaved = autoSaved;
+	}
+
+	public get isAutoSaved(): boolean {
+		return this._isAutoSaved;
 	}
 }
 
@@ -280,6 +291,18 @@ export interface IResult {
 	success?: boolean;
 }
 
+export interface IAutoSaveConfiguration {
+	autoSaveDelay: number;
+	autoSaveFocusChange: boolean;
+}
+
+export enum AutoSaveMode {
+	OFF,
+	AFTER_SHORT_DELAY,
+	AFTER_LONG_DELAY,
+	ON_FOCUS_CHANGE
+}
+
 export var ITextFileService = createDecorator<ITextFileService>(TEXT_FILE_SERVICE_ID);
 
 export interface ITextFileService extends IDisposable {
@@ -294,12 +317,12 @@ export interface ITextFileService extends IDisposable {
 	isDirty(resource?: URI): boolean;
 
 	/**
-	 * Returs all resources that are currently dirty matching the provided resource or all dirty resources.
+	 * Returns all resources that are currently dirty matching the provided resources or all dirty resources.
 	 *
-	 * @param resource the resource to check for being dirty. If it is not specified, will check for
+	 * @param resources the resources to check for being dirty. If it is not specified, will check for
 	 * all dirty resources.
 	 */
-	getDirty(resource?: URI): URI[];
+	getDirty(resources?: URI[]): URI[];
 
 	/**
 	 * Saves the resource.
@@ -342,14 +365,30 @@ export interface ITextFileService extends IDisposable {
 	revertAll(resources?: URI[], force?: boolean): TPromise<ITextFileOperationResult>;
 
 	/**
-	 * Brings up the confirm dialog to either save, dont save or cancel.
+	 * Brings up the confirm dialog to either save, don't save or cancel.
 	 *
-	 * @param resource the resource of the file to ask for confirmation.
+	 * @param resources the resources of the files to ask for confirmation or null if
+	 * confirming for all dirty resources.
 	 */
-	confirmSave(resource?: URI): ConfirmResult;
+	confirmSave(resources?: URI[]): ConfirmResult;
 
 	/**
 	 * Provides access to the list of working files.
 	 */
 	getWorkingFilesModel(): IWorkingFilesModel;
+
+	/**
+	 * Convinient fast access to the current auto save mode.
+	 */
+	getAutoSaveMode(): AutoSaveMode;
+
+	/**
+	 * Convinient fast access to the raw configured auto save settings.
+	 */
+	getAutoSaveConfiguration(): IAutoSaveConfiguration;
+
+	/**
+	 * Event is fired with the auto save configuration whenever it changes.
+	 */
+	onAutoSaveConfigurationChange: Event<IAutoSaveConfiguration>;
 }

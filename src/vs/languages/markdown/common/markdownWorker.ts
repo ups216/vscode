@@ -5,17 +5,12 @@
 'use strict';
 
 import WinJS = require('vs/base/common/winjs.base');
-import {AbstractModeWorker} from 'vs/editor/common/modes/abstractModeWorker';
-import Network = require('vs/base/common/network');
+import URI from 'vs/base/common/uri';
 import Types = require('vs/base/common/types');
-import EditorCommon = require('vs/editor/common/editorCommon');
 import Modes = require('vs/editor/common/modes');
-import Strings = require('vs/base/common/strings');
 import Paths = require('vs/base/common/paths');
-import Marked = require('vs/languages/markdown/common/marked');
-import ModesExtensions = require('vs/editor/common/modes/modesRegistry');
+import Marked = require('vs/base/common/marked/marked');
 import {tokenizeToString} from 'vs/editor/common/modes/textToHtmlTokenizer';
-import Platform = require('vs/platform/platform');
 import {isMacintosh} from 'vs/base/common/platform';
 import {IModeService} from 'vs/editor/common/services/modeService';
 import {IResourceService} from 'vs/editor/common/services/resourceService';
@@ -27,7 +22,7 @@ enum Theme {
 	HC_BLACK
 }
 
-export class MarkdownWorker extends AbstractModeWorker {
+export class MarkdownWorker {
 
 	private static DEFAULT_MODE = 'text/plain';
 
@@ -99,15 +94,23 @@ export class MarkdownWorker extends AbstractModeWorker {
 	].join('\n');
 
 	private modeService: IModeService;
+	private resourceService:IResourceService;
+	private markerService: IMarkerService;
+	private _modeId: string;
 
-	constructor(mode: Modes.IMode, participants: Modes.IWorkerParticipant[], @IResourceService resourceService: IResourceService,
-		@IMarkerService markerService: IMarkerService, @IModeService modeService:IModeService) {
-		super(mode, participants, resourceService, markerService);
-
+	constructor(
+		modeId: string,
+		@IResourceService resourceService: IResourceService,
+		@IMarkerService markerService: IMarkerService,
+		@IModeService modeService: IModeService
+	) {
+		this._modeId = modeId;
+		this.resourceService = resourceService;
+		this.markerService = markerService;
 		this.modeService = modeService;
 	}
 
-	_doConfigure(options: any): WinJS.TPromise<boolean> {
+	_doConfigure(options: any): WinJS.TPromise<void> {
 		if (options && options.theme) {
 			this.theme = (options.theme === 'vs-dark') ? Theme.DARK : (options.theme === 'vs') ? Theme.LIGHT : Theme.HC_BLACK;
 		}
@@ -116,10 +119,10 @@ export class MarkdownWorker extends AbstractModeWorker {
 			this.cssLinks = options.styles;
 		}
 
-		return WinJS.TPromise.as(false);
+		return WinJS.TPromise.as(void 0);
 	}
 
-	public getEmitOutput(resource: Network.URL, baseUrl: string, absoluteWorkersResourcePath: string): WinJS.TPromise<Modes.IEmitOutput> { // TODO@Ben technical debt: worker cannot resolve paths absolute
+	public getEmitOutput(resource: URI, absoluteWorkersResourcePath: string): WinJS.TPromise<Modes.IEmitOutput> { // TODO@Ben technical debt: worker cannot resolve paths absolute
 		let model = this.resourceService.get(resource);
 		let cssLinks: string[] = this.cssLinks || [];
 
@@ -127,7 +130,7 @@ export class MarkdownWorker extends AbstractModeWorker {
 		let renderer = new Marked.marked.Renderer();
 		let $this = this;
 		renderer.image = function(href: string, title: string, text: string): string {
-			let out = '<img src="' + $this.fixHref(resource, href, baseUrl) + '" alt="' + text + '"';
+			let out = '<img src="' + $this.fixHref(resource, href) + '" alt="' + text + '"';
 			if (title) {
 				out += ' title="' + title + '"';
 			}
@@ -158,8 +161,7 @@ export class MarkdownWorker extends AbstractModeWorker {
 		let highlighter = function(code: string, lang: string, callback?: (error: Error, result: string) => void) {
 
 			// Lookup the mode and use the tokenizer to get the HTML
-			let modesRegistry = <ModesExtensions.IEditorModesRegistry>Platform.Registry.as(ModesExtensions.Extensions.EditorModes);
-			let mimeForLang = modesRegistry.getModeIdForLanguageName(lang) || lang || MarkdownWorker.DEFAULT_MODE;
+			let mimeForLang = modeService.getModeIdForLanguageName(lang) || lang || MarkdownWorker.DEFAULT_MODE;
 			modeService.getOrCreateMode(mimeForLang).then((mode) => {
 				callback(null, tokenizeToString(code, mode));
 			});
@@ -182,10 +184,9 @@ export class MarkdownWorker extends AbstractModeWorker {
 					'<meta http-equiv="Content-type" content="text/html;charset=UTF-8">',
 					(cssLinks.length === 0) ? '<link rel="stylesheet" href="' + absoluteWorkersResourcePath + '/markdown.css" type="text/css" media="screen">' : '',
 					(cssLinks.length === 0) ? '<link rel="stylesheet" href="' + absoluteWorkersResourcePath + '/tokens.css" type="text/css" media="screen">' : '',
-					'<base href="' + baseUrl + '" />',
 					(this.theme === Theme.LIGHT) ? MarkdownWorker.LIGHT_SCROLLBAR_CSS : (this.theme === Theme.DARK) ? MarkdownWorker.DARK_SCROLLBAR_CSS : MarkdownWorker.HC_BLACK_SCROLLBAR_CSS,
 					cssLinks.map((style) => {
-						return '<link rel="stylesheet" href="' + this.fixHref(resource, style, baseUrl) + '" type="text/css" media="screen">';
+						return '<link rel="stylesheet" href="' + this.fixHref(resource, style) + '" type="text/css" media="screen">';
 					}).join('\n'),
 					'</head>',
 					isMacintosh ? '<body class="mac">' : '<body>'
@@ -213,26 +214,16 @@ export class MarkdownWorker extends AbstractModeWorker {
 		});
 	}
 
-	private fixHref(resource: Network.URL, href: string, baseUrl: string): string {
+	private fixHref(resource: URI, href: string): string {
 		if (href) {
-			let url = new Network.URL(href);
 
-			// URL is actually a path
-			if (!url.getScheme()) {
-				let path = href;
-
-				// the user might have used windows backslash, but we only support slashes in URLs, so fix up
-				path = Strings.replaceAll(path, '\\', '/');
-
-				// Absolute path: resolve against base URL
-				if (path[0] === '/') {
-					return Paths.join(baseUrl, path);
-				}
-
-				// Relative path: resolve against resource URL
-				let resourcePath = resource.getPath();
-				return Paths.join(Paths.dirname(resourcePath), path);
+			// Return early if href is already a URL
+			if (URI.parse(href).scheme) {
+				return href;
 			}
+
+			// Otherwise convert to a file URI by joining the href with the resource location
+			return URI.file(Paths.join(Paths.dirname(resource.fsPath), href)).toString();
 		}
 
 		return href;

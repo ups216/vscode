@@ -102,7 +102,7 @@ export class Emitter<T> {
 	 * To be kept private to fire an event to
 	 * subscribers
 	 */
-	fire(event: T): any {
+	fire(event?: T): any {
 		if (this._callbacks) {
 			this._callbacks.invoke.call(this._callbacks, event);
 		}
@@ -119,25 +119,25 @@ export class Emitter<T> {
 
 /**
  * Creates an Event which is backed-up by the event emitter. This allows
- * to use the existing eventing pattern and is likely using less memeory.
+ * to use the existing eventing pattern and is likely using less memory.
  * Sample:
-
- 	class Document {
-
-		private _eventbus = new EventEmitter();
-
-		public onDidChange = fromEventEmitter(this._eventbus, 'changed');
-
-		// getter-style
-		// get onDidChange(): Event<(value:string)=>any> {
-		// 	cache fromEventEmitter result and return
-		// }
-
-		private _doIt() {
-			// ...
-			this._eventbus.emit('changed', value)
-		}
-	}
+ *
+ * 	class Document {
+ *
+ *		private _eventbus = new EventEmitter();
+ *
+ *		public onDidChange = fromEventEmitter(this._eventbus, 'changed');
+ *
+ *		// getter-style
+ *		// get onDidChange(): Event<(value:string)=>any> {
+ *		// 	cache fromEventEmitter result and return
+ *		// }
+ *
+ *		private _doIt() {
+ *			// ...
+ *			this._eventbus.emit('changed', value)
+ *		}
+ *	}
  */
 export function fromEventEmitter<T>(emitter: EventEmitter, eventType: string): Event<T> {
 	return function (listener: (e: T) => any, thisArgs?: any, disposables?: IDisposable[]): IDisposable {
@@ -149,4 +149,61 @@ export function fromEventEmitter<T>(emitter: EventEmitter, eventType: string): E
 		}
 		return result;
 	};
+}
+
+export function mapEvent<I,O>(event: Event<I>, map: (i:I)=>O): Event<O> {
+	return (listener, thisArgs?, disposables?) =>
+		event(i => listener(map(i)), thisArgs, disposables);
+}
+
+enum EventDelayerState {
+	Idle,
+	Running
+}
+
+/**
+ * The EventDelayer is useful in situations in which you want
+ * to delay firing your events during some code.
+ * You can wrap that code and be sure that the event will not
+ * be fired during that wrap.
+ *
+ * ```
+ * const emitter: Emitter;
+ * const delayer = new EventDelayer();
+ * const delayedEvent = delayer.delay(emitter.event);
+ *
+ * delayedEvent(console.log);
+ *
+ * delayer.wrap(() => {
+ *   emitter.fire(); // event will not be fired yet
+ * });
+ *
+ * // event will only be fired at this point
+ * ```
+ */
+export class EventBufferer {
+
+	private buffers: Function[][] = [];
+
+	wrapEvent<T>(event: Event<T>): Event<T> {
+		return (listener, thisArgs?, disposables?) => {
+			return event(i => {
+				const buffer = this.buffers[this.buffers.length - 1];
+
+				if (buffer) {
+					buffer.push(() => listener.call(thisArgs, i));
+				} else {
+					listener.call(thisArgs, i);
+				}
+			}, void 0, disposables);
+		};
+	}
+
+	bufferEvents(fn: () => void): void {
+		const buffer = [];
+		this.buffers.push(buffer);
+		fn();
+		this.buffers.pop();
+		buffer.forEach(flush => flush());
+	}
 }

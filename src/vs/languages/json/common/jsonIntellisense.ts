@@ -6,7 +6,7 @@
 
 import EditorCommon = require('vs/editor/common/editorCommon');
 import Modes = require('vs/editor/common/modes');
-import Network = require('vs/base/common/network');
+import URI from 'vs/base/common/uri';
 import Parser = require('./parser/jsonParser');
 import SchemaService = require('./jsonSchemaService');
 import Types = require('vs/base/common/types');
@@ -21,7 +21,7 @@ export class JSONIntellisense {
 
 	private schemaService: SchemaService.IJSONSchemaService;
 	private requestService: IRequestService;
-	private contributions: JsonWorker.IJSONWorkerContribution[]
+	private contributions: JsonWorker.IJSONWorkerContribution[];
 
 	constructor(schemaService: SchemaService.IJSONSchemaService, requestService: IRequestService, contributions: JsonWorker.IJSONWorkerContribution[]) {
 		this.schemaService = schemaService;
@@ -29,7 +29,7 @@ export class JSONIntellisense {
 		this.contributions = contributions;
 	}
 
-	public doSuggest(resource: Network.URL, modelMirror: EditorCommon.IMirrorModel, position: EditorCommon.IPosition): WinJS.TPromise<Modes.ISuggestions> {
+	public doSuggest(resource: URI, modelMirror: EditorCommon.IMirrorModel, position: EditorCommon.IPosition): WinJS.TPromise<Modes.ISuggestResult> {
 		var currentWord = modelMirror.getWordUntilPosition(position).word;
 
 		var parser = new Parser.JSONParser();
@@ -39,16 +39,22 @@ export class JSONIntellisense {
 
 		var doc = parser.parse(modelMirror.getValue(), config);
 
-		var result: Modes.ISuggestions = {
+		var result: Modes.ISuggestResult = {
 			currentWord: currentWord,
 			incomplete: false,
 			suggestions: []
 		};
+		var overwriteBefore = void 0;
+		var overwriteAfter = void 0;
+
 		var proposed: { [key: string]: boolean } = {};
 		var collector : JsonWorker.ISuggestionsCollector = {
 			add: (suggestion: Modes.ISuggestion) => {
 				if (!proposed[suggestion.label]) {
 					proposed[suggestion.label] = true;
+
+					suggestion.overwriteBefore = overwriteBefore;
+					suggestion.overwriteAfter = overwriteAfter;
 					result.suggestions.push(suggestion);
 				}
 			},
@@ -67,15 +73,17 @@ export class JSONIntellisense {
 			var node = doc.getNodeFromOffsetEndInclusive(offset);
 			var addValue = true;
 			var currentKey = currentWord;
+			var currentProperty : Parser.PropertyASTNode = null;
 			if (node) {
 
 				if (node.type === 'string') {
 					var stringNode = <Parser.StringASTNode> node;
 					if (stringNode.isKey) {
 						var nodeRange = modelMirror.getRangeFromOffsetAndLength(node.start, node.end - node.start);
-						result.overwriteBefore = position.column - nodeRange.startColumn;
-						result.overwriteAfter = nodeRange.endColumn - position.column;
+						overwriteBefore = position.column - nodeRange.startColumn;
+						overwriteAfter = nodeRange.endColumn - position.column;
 						addValue = !(node.parent && ((<Parser.PropertyASTNode> node.parent).value));
+						currentProperty = node.parent ? <Parser.PropertyASTNode> node.parent : null;
 						currentKey = modelMirror.getValueInRange({ startColumn: nodeRange.startColumn + 1, startLineNumber: nodeRange.startLineNumber, endColumn: position.column, endLineNumber: position.lineNumber });
 						if (node.parent) {
 							node = node.parent.parent;
@@ -91,69 +99,98 @@ export class JSONIntellisense {
 				if (node.start === offset) {
 					return result;
 				}
+				// don't suggest properties that are already present
+				var properties = (<Parser.ObjectASTNode> node).properties;
+				properties.forEach(p => {
+					if (!currentProperty || currentProperty !== p) {
+						proposed[p.key.value] = true;
+					}
+				});
 
 				if (schema) {
 					// property proposals with schema
-					var properties = (<Parser.ObjectASTNode> node).properties;
 					var isLast = properties.length === 0 || offset >= properties[properties.length - 1].start;
-
-					collectionPromises.push(this.getPropertySuggestions(schema, doc, node, currentKey, addValue, isLast, collector));
+					this.getPropertySuggestions(resource, schema, doc, node, currentKey, addValue, isLast, collector);
 				} else if (node.parent) {
 					// property proposals without schema
-					collectionPromises.push(this.getSchemaLessPropertySuggestions(doc, node, collector));
+					this.getSchemaLessPropertySuggestions(doc, node, collector);
 				}
+
+				var location = node.getNodeLocation();
+				this.contributions.forEach((contribution) => {
+					var collectPromise = contribution.collectPropertySuggestions(resource, location, currentWord, addValue, isLast, collector);
+					if (collectPromise) {
+						collectionPromises.push(collectPromise);
+					}
+				});
 			}
 
 			// proposals for values
-			if (node && (node.type === 'string' || node.type === 'number' || node.type === 'boolean' || node.type === 'null')) {
+			if (node && (node.type === 'string' || node.type === 'number' || node.type === 'integer' || node.type === 'boolean' || node.type === 'null')) {
 				var nodeRange = modelMirror.getRangeFromOffsetAndLength(node.start, node.end - node.start);
-				result.overwriteBefore = position.column - nodeRange.startColumn;
-				result.overwriteAfter = nodeRange.endColumn - position.column;
+				overwriteBefore = position.column - nodeRange.startColumn;
+				overwriteAfter = nodeRange.endColumn - position.column;
 				node = node.parent;
 			}
 
 			if (schema) {
 				// value proposals with schema
-				collectionPromises.push(this.getValueSuggestions(schema, doc, node, offset, collector));
+				this.getValueSuggestions(resource, schema, doc, node, offset, collector);
 			} else {
 				// value proposals without schema
-				collectionPromises.push(this.getSchemaLessValueSuggestions(doc, node, offset, modelMirror, collector));
+				this.getSchemaLessValueSuggestions(doc, node, offset, modelMirror, collector);
 			}
+			if (!node) {
+				this.contributions.forEach((contribution) => {
+					var collectPromise = contribution.collectDefaultSuggestions(resource, collector);
+					if (collectPromise) {
+						collectionPromises.push(collectPromise);
+					}
+				});
+			} else {
+				if ((node.type === 'property') && offset > (<Parser.PropertyASTNode> node).colonOffset) {
+					var parentKey = (<Parser.PropertyASTNode>node).key.value;
+
+					var valueNode = (<Parser.PropertyASTNode> node).value;
+					if (!valueNode || offset <= valueNode.end) {
+						var location = node.parent.getNodeLocation();
+						this.contributions.forEach((contribution) => {
+							var collectPromise = contribution.collectValueSuggestions(resource, location, parentKey, collector);
+							if (collectPromise) {
+								collectionPromises.push(collectPromise);
+							}
+						});
+					}
+				}
+			}
+
+
 			return WinJS.Promise.join(collectionPromises).then(() => { return result; } );
 		});
 	}
 
-	private getPropertySuggestions(schema: SchemaService.ResolvedSchema, doc: Parser.JSONDocument, node: Parser.ASTNode, currentWord: string, addValue: boolean, isLast: boolean, collector: JsonWorker.ISuggestionsCollector): WinJS.Promise {
+	private getPropertySuggestions(resource: URI, schema: SchemaService.ResolvedSchema, doc: Parser.JSONDocument, node: Parser.ASTNode, currentWord: string, addValue: boolean, isLast: boolean, collector: JsonWorker.ISuggestionsCollector): void {
 		var matchingSchemas: Parser.IApplicableSchema[] = [];
 		doc.validate(schema.schema, matchingSchemas, node.start);
 
-		var collectPromises: WinJS.TPromise<Modes.ISuggestion[]>[] = [];
 		matchingSchemas.forEach((s) => {
 			if (s.node === node && !s.inverted) {
 				var schemaProperties = s.schema.properties;
 				if (schemaProperties) {
 					Object.keys(schemaProperties).forEach((key: string) => {
 						var propertySchema = schemaProperties[key];
-						collector.add({ type: 'property', label: key, codeSnippet: this.getSnippetForProperty(key, propertySchema, addValue, isLast), documentationLabel: propertySchema.description || '' });
-					});
-				}
-
-				var contributionKey = s.schema.id;
-				if (contributionKey) {
-					this.contributions.forEach((contribution) => {
-						collectPromises.push(contribution.collectPropertySuggestions(contributionKey, currentWord, addValue, isLast, collector));
+						collector.add({ type: 'property', label: key, codeSnippet: this.getTextForProperty(key, propertySchema, addValue, isLast), documentationLabel: propertySchema.description || '' });
 					});
 				}
 			}
 		});
-		return WinJS.Promise.join(collectPromises);
 	}
 
-	private getSchemaLessPropertySuggestions(doc: Parser.JSONDocument, node: Parser.ASTNode, collector: JsonWorker.ISuggestionsCollector): WinJS.Promise {
+	private getSchemaLessPropertySuggestions(doc: Parser.JSONDocument, node: Parser.ASTNode, collector: JsonWorker.ISuggestionsCollector): void {
 		var collectSuggestionsForSimilarObject = (obj: Parser.ObjectASTNode) => {
 			obj.properties.forEach((p) => {
 				var key = p.key.value;
-				collector.add({ type: 'property', label: key, codeSnippet: this.getSnippetForSimilarProperty(key, p.value), documentationLabel: '' });
+				collector.add({ type: 'property', label: key, codeSnippet: this.getTextForSimilarProperty(key, p.value), documentationLabel: '' });
 			});
 		};
 		if (node.parent.type === 'property') {
@@ -173,12 +210,11 @@ export class JSONIntellisense {
 				}
 			});
 		}
-		return WinJS.Promise.as(0);
 	}
 
-	public getSchemaLessValueSuggestions(doc: Parser.JSONDocument, node: Parser.ASTNode, offset: number, modelMirror: EditorCommon.IMirrorModel, collector: JsonWorker.ISuggestionsCollector): WinJS.Promise {
+	public getSchemaLessValueSuggestions(doc: Parser.JSONDocument, node: Parser.ASTNode, offset: number, modelMirror: EditorCommon.IMirrorModel, collector: JsonWorker.ISuggestionsCollector): void {
 		var collectSuggestionsForValues = (value: Parser.ASTNode) => {
-			var content = this.getMatchingSnippet(value, modelMirror);
+			var content = this.getTextForMatchingNode(value, modelMirror);
 			collector.add({ type: this.getSuggestionType(value.type), label: content, codeSnippet: content, documentationLabel: '' });
 			if (value.type === 'boolean') {
 				this.addBooleanSuggestion(!value.getValue(), collector);
@@ -223,24 +259,19 @@ export class JSONIntellisense {
 				}
 			}
 		}
-		return WinJS.Promise.as(0);
 	}
 
 
-	public getValueSuggestions(schema: SchemaService.ResolvedSchema, doc: Parser.JSONDocument, node: Parser.ASTNode, offset: number, collector: JsonWorker.ISuggestionsCollector) : WinJS.Promise {
+	public getValueSuggestions(resource: URI, schema: SchemaService.ResolvedSchema, doc: Parser.JSONDocument, node: Parser.ASTNode, offset: number, collector: JsonWorker.ISuggestionsCollector) : void {
 
-		var collectPromises: WinJS.TPromise<Modes.ISuggestion[]>[] = [];
 		if (!node) {
 			this.addDefaultSuggestion(schema.schema, collector);
-			this.contributions.forEach((contribution) => {
-				collectPromises.push(contribution.collectDefaultSuggestions(schema.schema.id, collector));
-			});
 		} else {
 			var parentKey: string = null;
 			if (node && (node.type === 'property') && offset > (<Parser.PropertyASTNode> node).colonOffset) {
 				var valueNode = (<Parser.PropertyASTNode> node).value;
 				if (valueNode && offset > valueNode.end) {
-					return WinJS.Promise.as(0); // we are past the value node
+					return; // we are past the value node
 				}
 				parentKey = (<Parser.PropertyASTNode>node).key.value;
 				node = node.parent;
@@ -248,6 +279,7 @@ export class JSONIntellisense {
 			if (node && (parentKey !== null || node.type === 'array')) {
 				var matchingSchemas: Parser.IApplicableSchema[] = [];
 				doc.validate(schema.schema, matchingSchemas, node.start);
+
 				matchingSchemas.forEach((s) => {
 					if (s.node === node && !s.inverted && s.schema) {
 						if (s.schema.items) {
@@ -261,28 +293,20 @@ export class JSONIntellisense {
 								this.addEnumSuggestion(propertySchema, collector);
 							}
 						}
-
-						var contributionKey = s.schema.id;
-						if (contributionKey) {
-							this.contributions.forEach((contribution) => {
-								collectPromises.push(contribution.collectValueSuggestions(contributionKey, parentKey, collector));
-							});
-						}
 					}
 				});
 
 			}
 		}
-		return WinJS.Promise.join(collectPromises);
 	}
 
 	private addBooleanSuggestion(value: boolean, collector: JsonWorker.ISuggestionsCollector): void {
-		collector.add({ type: this.getSuggestionType('boolean'), label: value ? 'true' : 'false', codeSnippet: this.getSnippetForValue(value), documentationLabel: '' });
+		collector.add({ type: this.getSuggestionType('boolean'), label: value ? 'true' : 'false', codeSnippet: this.getTextForEnumValue(value), documentationLabel: '' });
 	}
 
 	private addEnumSuggestion(schema: JsonSchema.IJSONSchema, collector: JsonWorker.ISuggestionsCollector): void {
 		if (Array.isArray(schema.enum)) {
-			schema.enum.forEach((enm) => collector.add({ type: this.getSuggestionType(schema.type), label: this.getLabelForValue(enm), codeSnippet: this.getSnippetForValue(enm), documentationLabel: '' }));
+			schema.enum.forEach((enm) => collector.add({ type: this.getSuggestionType(schema.type), label: this.getLabelForValue(enm), codeSnippet: this.getTextForEnumValue(enm), documentationLabel: '' }));
 		} else if (schema.type === 'boolean') {
 			this.addBooleanSuggestion(true, collector);
 			this.addBooleanSuggestion(false, collector);
@@ -303,8 +327,17 @@ export class JSONIntellisense {
 			collector.add({
 				type: this.getSuggestionType(schema.type),
 				label: this.getLabelForValue(schema.default),
-				codeSnippet: this.getSnippetForValue(schema.default),
+				codeSnippet: this.getTextForValue(schema.default),
 				typeLabel:  nls.localize('json.suggest.default', 'Default value'),
+			});
+		}
+		if (Array.isArray(schema.defaultSnippets)) {
+			schema.defaultSnippets.forEach(s => {
+				collector.add({
+					type: 'snippet',
+					label: this.getLabelForSnippetValue(s.body),
+					codeSnippet: this.getTextForSnippetValue(s.body)
+				});
 			});
 		}
 		if (Array.isArray(schema.allOf)) {
@@ -327,7 +360,26 @@ export class JSONIntellisense {
 		return label;
 	}
 
-	private getSnippetForValue(value: any) : string {
+	private getLabelForSnippetValue(value: any): string {
+		let label = JSON.stringify(value);
+		label = label.replace(/\{\{|\}\}/g, '');
+		if (label.length > 57) {
+			return label.substr(0, 57).trim() + '...';
+		}
+		return label;
+	}
+
+	private getTextForValue(value: any): string {
+		var text = JSON.stringify(value, null, '\t');
+		text = text.replace(/[\\\{\}]/g, '\\$&');
+		return text;
+	}
+
+	private getTextForSnippetValue(value: any): string {
+		return JSON.stringify(value, null, '\t');
+	}
+
+	private getTextForEnumValue(value: any) : string {
 		var snippet = JSON.stringify(value, null, '\t');
 		switch (typeof value) {
 			case 'object':
@@ -338,13 +390,14 @@ export class JSONIntellisense {
 			case 'string':
 				return '"{{' + snippet.substr(1, snippet.length - 2) + '}}"';
 			case 'number':
+			case 'integer':
 			case 'boolean':
 				return '{{' + snippet + '}}';
 		}
 		return snippet;
 	}
 
-	private getSuggestionType(type: any): string {
+	private getSuggestionType(type: any): Modes.SuggestionType {
 		if (Array.isArray(type)) {
 			var array = <any[]> type;
 			type = array.length > 0 ? array[0] : null;
@@ -361,7 +414,7 @@ export class JSONIntellisense {
 	}
 
 
-	private getMatchingSnippet(node: Parser.ASTNode, modelMirror: EditorCommon.IMirrorModel): string {
+	private getTextForMatchingNode(node: Parser.ASTNode, modelMirror: EditorCommon.IMirrorModel): string {
 		switch (node.type) {
 			case 'array':
 				return '[]';
@@ -373,9 +426,9 @@ export class JSONIntellisense {
 		}
 	}
 
-	private getSnippetForProperty(key: string, propertySchema: JsonSchema.IJSONSchema, addValue:boolean, isLast: boolean): string {
+	private getTextForProperty(key: string, propertySchema: JsonSchema.IJSONSchema, addValue:boolean, isLast: boolean): string {
 
-		var result = '"' + key + '"';
+		let result = this.getTextForValue(key);
 		if (!addValue) {
 			return result;
 		}
@@ -383,9 +436,9 @@ export class JSONIntellisense {
 
 		var defaultVal = propertySchema.default;
 		if (!Types.isUndefined(defaultVal)) {
-			result = result + this.getSnippetForValue(defaultVal);
+			result = result + this.getTextForEnumValue(defaultVal);
 		} else if (propertySchema.enum && propertySchema.enum.length > 0) {
-			result = result + this.getSnippetForValue(propertySchema.enum[0]);
+			result = result + this.getTextForEnumValue(propertySchema.enum[0]);
 		} else {
 			switch (propertySchema.type) {
 				case 'boolean':
@@ -401,6 +454,7 @@ export class JSONIntellisense {
 					result += '[\n\t{{}}\n]';
 					break;
 				case 'number':
+				case 'integer':
 					result += '{{0}}';
 					break;
 				case 'null':
@@ -416,7 +470,7 @@ export class JSONIntellisense {
 		return result;
 	}
 
-	private getSnippetForSimilarProperty(key: string, templateValue: Parser.ASTNode): string {
-		return '"' + key + '"';
+	private getTextForSimilarProperty(key: string, templateValue: Parser.ASTNode): string {
+		return this.getTextForValue(key);
 	}
 }

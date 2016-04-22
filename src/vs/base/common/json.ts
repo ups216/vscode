@@ -86,7 +86,7 @@ export function createScanner(text:string, ignoreTrivia:boolean = false):JSONSca
 			pos++;
 		} else {
 			pos++;
-	        while (pos < text.length && isDigit(text.charCodeAt(pos))) {
+			while (pos < text.length && isDigit(text.charCodeAt(pos))) {
 				pos++;
 			}
 		}
@@ -198,7 +198,7 @@ export function createScanner(text:string, ignoreTrivia:boolean = false):JSONSca
 	function scanNext():SyntaxKind {
 
 		value = '';
-		scanError = ScanError.None,
+		scanError = ScanError.None;
 
 		tokenOffset = pos;
 
@@ -679,7 +679,7 @@ export function parse(text:string, errors: string[] = []) : any {
 		while (_scanner.getToken() !== SyntaxKind.CloseBraceToken && _scanner.getToken() !== SyntaxKind.EOF) {
 			if (_scanner.getToken() === SyntaxKind.CommaToken) {
 				if (!needsComma) {
-					handleError(nls.localize('ValeExpected', 'Value expected'), [], [] );
+					handleError(nls.localize('ValueExpected', 'Value expected'), [], [] );
 				}
 				scanNext(); // consume comma
 			} else if (needsComma) {

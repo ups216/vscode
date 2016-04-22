@@ -4,22 +4,23 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
+import URI from 'vs/base/common/uri';
 import winjs = require('vs/base/common/winjs.base');
-import {AbstractModeWorker} from 'vs/editor/common/modes/abstractModeWorker';
 import beautifyHTML = require('vs/languages/lib/common/beautify-html');
 import htmlTags = require('vs/languages/html/common/htmlTags');
 import network = require('vs/base/common/network');
 import EditorCommon = require('vs/editor/common/editorCommon');
 import Modes = require('vs/editor/common/modes');
 import strings = require('vs/base/common/strings');
-import {Range} from 'vs/editor/common/core/range';
 import {Position} from 'vs/editor/common/core/position';
-import {IRequestService} from 'vs/platform/request/common/request';
 import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
 import {IMarkerService} from 'vs/platform/markers/common/markers';
 import {IResourceService} from 'vs/editor/common/services/resourceService';
 import {getScanner, IHTMLScanner} from 'vs/languages/html/common/htmlScanner';
 import {isTag, DELIM_END, DELIM_START, DELIM_ASSIGN, ATTRIB_NAME, ATTRIB_VALUE} from 'vs/languages/html/common/htmlTokenTypes';
+import {isEmptyElement} from 'vs/languages/html/common/htmlEmptyTagsShared';
+import {filterSuggestions} from 'vs/editor/common/modes/supports/suggestSupport';
+import paths = require('vs/base/common/paths');
 
 enum LinkDetectionState {
 	LOOKING_FOR_HREF_OR_SRC = 1,
@@ -31,16 +32,25 @@ interface IColorRange {
 	value:string;
 }
 
-export class HTMLWorker extends AbstractModeWorker {
+export class HTMLWorker {
 
 	private _contextService: IWorkspaceContextService;
-
+	private resourceService:IResourceService;
+	private markerService: IMarkerService;
+	private _modeId: string;
 	private _tagProviders: htmlTags.IHTMLTagProvider[];
+	private formatSettings: any;
 
-	constructor(mode: Modes.IMode, participants: Modes.IWorkerParticipant[], @IResourceService resourceService: IResourceService,
-		@IMarkerService markerService: IMarkerService, @IWorkspaceContextService contextService:IWorkspaceContextService) {
+	constructor(
+		modeId: string,
+		@IResourceService resourceService: IResourceService,
+		@IMarkerService markerService: IMarkerService,
+		@IWorkspaceContextService contextService:IWorkspaceContextService
+	) {
 
-		super(mode, participants, resourceService, markerService);
+		this._modeId = modeId;
+		this.resourceService = resourceService;
+		this.markerService = markerService;
 		this._contextService = contextService;
 
 		this._tagProviders = [];
@@ -51,9 +61,10 @@ export class HTMLWorker extends AbstractModeWorker {
 
 	protected addCustomTagProviders(providers: htmlTags.IHTMLTagProvider[]): void {
 		providers.push(htmlTags.getAngularTagProvider());
+		providers.push(htmlTags.getIonicTagProvider());
 	}
 
-	public format(resource: network.URL, range: EditorCommon.IRange, options: Modes.IFormattingOptions): winjs.TPromise<EditorCommon.ISingleEditOperation[]> {
+	public format(resource: URI, range: EditorCommon.IRange, options: Modes.IFormattingOptions): winjs.TPromise<EditorCommon.ISingleEditOperation[]> {
 		return this._delegateToModeAtPosition(resource, Position.startPosition(range), (isEmbeddedMode, model) => {
 			if (isEmbeddedMode && model.getMode().formattingSupport) {
 				return model.getMode().formattingSupport.formatRange(model.getAssociatedResource(), range, options);
@@ -63,15 +74,24 @@ export class HTMLWorker extends AbstractModeWorker {
 		});
 	}
 
-	private formatHTML(resource: network.URL, range: EditorCommon.IRange, options: Modes.IFormattingOptions): winjs.TPromise<EditorCommon.ISingleEditOperation[]> {
-		var model = this.resourceService.get(resource);
-		var value = range ? model.getValueInRange(range) : model.getValue();
+	private formatHTML(resource: URI, range: EditorCommon.IRange, options: Modes.IFormattingOptions): winjs.TPromise<EditorCommon.ISingleEditOperation[]> {
+		let model = this.resourceService.get(resource);
+		let value = range ? model.getValueInRange(range) : model.getValue();
 
-		var result: string = beautifyHTML.html_beautify(value, {
+		let htmlOptions : beautifyHTML.IBeautifyHTMLOptions = {
 			indent_size: options.insertSpaces ? options.tabSize : 1,
 			indent_char: options.insertSpaces ? ' ' : '\t',
-			wrap_line_length: 120
-		});
+			wrap_line_length: this.getFormatOption('wrapLineLength', 120),
+			unformatted: this.getTagsFormatOption('unformatted', void 0),
+			indent_inner_html: this.getFormatOption('indentInnerHtml', false),
+			preserve_newlines: this.getFormatOption('preserveNewLines', false),
+			max_preserve_newlines: this.getFormatOption('maxPreserveNewLines', void 0),
+			indent_handlebars: this.getFormatOption('indentHandlebars', false),
+			end_with_newline: this.getFormatOption('endWithNewline', false),
+			extra_liners: this.getTagsFormatOption('extraLiners', void 0),
+		};
+
+		let result = beautifyHTML.html_beautify(value, htmlOptions);
 
 		return winjs.TPromise.as([{
 			range: range,
@@ -79,26 +99,49 @@ export class HTMLWorker extends AbstractModeWorker {
 		}]);
 	}
 
-	_delegateToModeAtPosition<T>(resource:network.URL, position:EditorCommon.IPosition, callback:(isEmbeddedMode:boolean, model:EditorCommon.IMirrorModel) => T): T {
-		var model = this.resourceService.get(resource);
+	private getFormatOption(key: string, dflt: any): any {
+		if (this.formatSettings && this.formatSettings.hasOwnProperty(key)) {
+			let value = this.formatSettings[key];
+			if (value !== null) {
+				return value;
+			}
+		}
+		return dflt;
+	}
+
+	private getTagsFormatOption(key: string, dflt: string[]): string[] {
+		let list = <string> this.getFormatOption(key, null);
+		if (list) {
+			return list.split(',').map(t => t.trim().toLowerCase());
+		}
+		return dflt;
+	}
+
+	_doConfigure(options: any): winjs.TPromise<void> {
+		this.formatSettings = options && options.format;
+		return winjs.TPromise.as(null);
+	}
+
+	_delegateToModeAtPosition<T>(resource:URI, position:EditorCommon.IPosition, callback:(isEmbeddedMode:boolean, model:EditorCommon.IMirrorModel) => T): T {
+		let model = this.resourceService.get(resource);
 
 		if (!model) {
 			return null;
 		}
 
-		var modelAtPosition = model.getEmbeddedAtPosition(position);
+		let modelAtPosition = model.getEmbeddedAtPosition(position);
 
 		if (!modelAtPosition) {
 			return callback(false, model);
 		}
 
-		var modeAtPosition = modelAtPosition.getMode();
+		let modeAtPosition = modelAtPosition.getMode();
 
-		return callback(modeAtPosition.getId() !== this._getMode().getId(), modelAtPosition);
+		return callback(modeAtPosition.getId() !== this._modeId, modelAtPosition);
 	}
 
-	_delegateToAllModes<T>(resource:network.URL, callback:(models:EditorCommon.IMirrorModel[]) => T): T {
-		var model = this.resourceService.get(resource);
+	_delegateToAllModes<T>(resource:URI, callback:(models:EditorCommon.IMirrorModel[]) => T): T {
+		let model = this.resourceService.get(resource);
 
 		if (!model) {
 			return null;
@@ -107,7 +150,7 @@ export class HTMLWorker extends AbstractModeWorker {
 		return callback(model.getAllEmbedded());
 	}
 
-	public computeInfo(resource:network.URL, position:EditorCommon.IPosition): winjs.TPromise<Modes.IComputeExtraInfoResult> {
+	public computeInfo(resource:URI, position:EditorCommon.IPosition): winjs.TPromise<Modes.IComputeExtraInfoResult> {
 		return this._delegateToModeAtPosition(resource, position, (isEmbeddedMode, model) => {
 			if (isEmbeddedMode && model.getMode().extraInfoSupport) {
 				return model.getMode().extraInfoSupport.computeInfo(model.getAssociatedResource(), position);
@@ -115,7 +158,7 @@ export class HTMLWorker extends AbstractModeWorker {
 		});
 	}
 
-	public findReferences(resource:network.URL, position:EditorCommon.IPosition, includeDeclaration:boolean): winjs.TPromise<Modes.IReference[]> {
+	public findReferences(resource:URI, position:EditorCommon.IPosition, includeDeclaration:boolean): winjs.TPromise<Modes.IReference[]> {
 		return this._delegateToModeAtPosition(resource, position, (isEmbeddedMode, model) => {
 			if (isEmbeddedMode && model.getMode().referenceSupport) {
 				return model.getMode().referenceSupport.findReferences(model.getAssociatedResource(), position, includeDeclaration);
@@ -123,7 +166,7 @@ export class HTMLWorker extends AbstractModeWorker {
 		});
 	}
 
-	public getRangesToPosition(resource:network.URL, position:EditorCommon.IPosition):winjs.TPromise<Modes.ILogicalSelectionEntry[]> {
+	public getRangesToPosition(resource:URI, position:EditorCommon.IPosition):winjs.TPromise<Modes.ILogicalSelectionEntry[]> {
 		return this._delegateToModeAtPosition(resource, position, (isEmbeddedMode, model) => {
 			if (isEmbeddedMode && model.getMode().logicalSelectionSupport) {
 				return model.getMode().logicalSelectionSupport.getRangesToPosition(model.getAssociatedResource(), position);
@@ -131,7 +174,7 @@ export class HTMLWorker extends AbstractModeWorker {
 		});
 	}
 
-	public findDeclaration(resource:network.URL, position:EditorCommon.IPosition):winjs.TPromise<Modes.IReference> {
+	public findDeclaration(resource:URI, position:EditorCommon.IPosition):winjs.TPromise<Modes.IReference> {
 		return this._delegateToModeAtPosition(resource, position, (isEmbeddedMode, model) => {
 			if (isEmbeddedMode && model.getMode().declarationSupport) {
 				return model.getMode().declarationSupport.findDeclaration(model.getAssociatedResource(), position);
@@ -139,16 +182,16 @@ export class HTMLWorker extends AbstractModeWorker {
 		});
 	}
 
-	public findColorDeclarations(resource:network.URL):winjs.TPromise<{range:EditorCommon.IRange; value:string; }[]> {
+	public findColorDeclarations(resource:URI):winjs.TPromise<{range:EditorCommon.IRange; value:string; }[]> {
 		return this._delegateToAllModes(resource, (models) => {
-			var allPromises: winjs.TPromise<IColorRange[]>[] = [];
+			let allPromises: winjs.TPromise<IColorRange[]>[] = [];
 
 			allPromises = models
 				.filter((model) => (typeof model.getMode()['findColorDeclarations'] === 'function'))
 				.map((model) => model.getMode()['findColorDeclarations'](model.getAssociatedResource()));
 
 			return winjs.TPromise.join(allPromises).then((results:IColorRange[][]) => {
-				var result:IColorRange[] = [];
+				let result:IColorRange[] = [];
 
 				results.forEach((oneResult) => result = result.concat(oneResult));
 
@@ -157,7 +200,7 @@ export class HTMLWorker extends AbstractModeWorker {
 		});
 	}
 
-	public getParameterHints(resource:network.URL, position:EditorCommon.IPosition):winjs.TPromise<Modes.IParameterHints> {
+	public getParameterHints(resource:URI, position:EditorCommon.IPosition):winjs.TPromise<Modes.IParameterHints> {
 		return this._delegateToModeAtPosition(resource, position, (isEmbeddedMode, model) => {
 			if (isEmbeddedMode && model.getMode().parameterHintsSupport) {
 				return model.getMode().parameterHintsSupport.getParameterHints(model.getAssociatedResource(), position);
@@ -166,15 +209,15 @@ export class HTMLWorker extends AbstractModeWorker {
 	}
 
 	private findMatchingOpenTag(scanner: IHTMLScanner) : string {
-		var closedTags : { [name:string]: number } = {};
-		var tagClosed = false;
+		let closedTags : { [name:string]: number } = {};
+		let tagClosed = false;
 		while (scanner.scanBack()) {
 			if (isTag(scanner.getTokenType()) && !tagClosed) {
-				var tag = scanner.getTokenContent();
+				let tag = scanner.getTokenContent();
 				scanner.scanBack();
 				if (scanner.getTokenType() === DELIM_END) {
 					closedTags[tag] = (closedTags[tag] || 0) + 1;
-				} else if (!htmlTags.isEmptyElement(tag)) {
+				} else if (!isEmptyElement(tag)) {
 					if (closedTags[tag]) {
 						closedTags[tag]--;
 					} else {
@@ -188,32 +231,31 @@ export class HTMLWorker extends AbstractModeWorker {
 		return null;
 	}
 
-	private collectTagSuggestions(scanner: IHTMLScanner, position: EditorCommon.IPosition, suggestions: Modes.ISuggestions): void {
-		var model = scanner.getModel();
-		var contentAfter = model.getLineContent(position.lineNumber).substr(position.column - 1);
-		var closeTag = isWhiteSpace(contentAfter) || strings.startsWith(contentAfter, '<') ? '>' : '';
+	private collectTagSuggestions(scanner: IHTMLScanner, position: EditorCommon.IPosition, suggestions: Modes.ISuggestResult): void {
+		let model = scanner.getModel();
+		let contentAfter = model.getLineContent(position.lineNumber).substr(position.column - 1);
+		let closeTag = isWhiteSpace(contentAfter) || strings.startsWith(contentAfter, '<') ? '>' : '';
 
-		var collectClosingTagSuggestion = (correctIndent:boolean) => {
-			var endPosition = scanner.getTokenPosition();
-			var matchingTag = this.findMatchingOpenTag(scanner);
+		let collectClosingTagSuggestion = (overwriteBefore: number) => {
+			let endPosition = scanner.getTokenPosition();
+			let matchingTag = this.findMatchingOpenTag(scanner);
 			if (matchingTag) {
-				var suggestion : Modes.ISuggestion = {
+				let suggestion : Modes.ISuggestion = {
 					label: '/' + matchingTag,
 					codeSnippet: '/' + matchingTag + closeTag,
+					overwriteBefore: overwriteBefore,
 					type: 'property'
 				};
 				suggestions.suggestions.push(suggestion);
 
 				// use indent from start tag
-				if (correctIndent) {
-					var startPosition = scanner.getTokenPosition();
-					if (endPosition.lineNumber !== startPosition.lineNumber) {
-						var startIndent = model.getLineContent(startPosition.lineNumber).substring(0, startPosition.column - 1);
-						var endIndent = model.getLineContent(endPosition.lineNumber).substring(0, endPosition.column - 1);
-						if (isWhiteSpace(startIndent) && isWhiteSpace(endIndent)) {
-							suggestions.overwriteBefore = position.column - 1;
-							suggestion.codeSnippet = startIndent + '</' + matchingTag + closeTag;
-						}
+				let startPosition = scanner.getTokenPosition();
+				if (endPosition.lineNumber !== startPosition.lineNumber) {
+					let startIndent = model.getLineContent(startPosition.lineNumber).substring(0, startPosition.column - 1);
+					let endIndent = model.getLineContent(endPosition.lineNumber).substring(0, endPosition.column - 1);
+					if (isWhiteSpace(startIndent) && isWhiteSpace(endIndent)) {
+						suggestion.overwriteBefore = position.column - 1; // replace from start of line
+						suggestion.codeSnippet = startIndent + '</' + matchingTag + closeTag;
 					}
 				}
 				return true;
@@ -223,32 +265,30 @@ export class HTMLWorker extends AbstractModeWorker {
 
 
 		if (scanner.getTokenType() === DELIM_END) {
-			suggestions.overwriteBefore = suggestions.currentWord.length + 1;
-
-			var hasClose = collectClosingTagSuggestion(true);
+			let hasClose = collectClosingTagSuggestion(suggestions.currentWord.length + 1);
 			if (!hasClose) {
-				suggestions.overwriteBefore = suggestions.currentWord.length + 1;
-
-
 				this._tagProviders.forEach((provider) => {
-					provider.collectTags((tag) => {
+					provider.collectTags((tag, label) => {
 						suggestions.suggestions.push({
 							label: '/' + tag,
+							overwriteBefore: suggestions.currentWord.length + 1,
 							codeSnippet: '/' + tag + closeTag,
-							type: 'property'
+							type: 'property',
+							documentationLabel: label
 						});
 					});
 				});
 			}
 		} else {
-			collectClosingTagSuggestion(false);
+			collectClosingTagSuggestion(suggestions.currentWord.length);
 
 			this._tagProviders.forEach((provider) => {
-				provider.collectTags((tag) => {
+				provider.collectTags((tag, label) => {
 					suggestions.suggestions.push({
 						label: tag,
 						codeSnippet: tag,
-						type: 'property'
+						type: 'property',
+						documentationLabel: label
 					});
 				});
 			});
@@ -256,12 +296,12 @@ export class HTMLWorker extends AbstractModeWorker {
 
 	}
 
-	private collectContentSuggestions(suggestions: Modes.ISuggestions): void {
+	private collectContentSuggestions(suggestions: Modes.ISuggestResult): void {
 		// disable the simple snippets in favor of the emmet templates
 	}
 
-	private collectAttributeSuggestions(scanner: IHTMLScanner, suggestions: Modes.ISuggestions): void {
-		var parentTag: string = null;
+	private collectAttributeSuggestions(scanner: IHTMLScanner, suggestions: Modes.ISuggestResult): void {
+		let parentTag: string = null;
 		do {
 			if (isTag(scanner.getTokenType())) {
 				parentTag = scanner.getTokenContent();
@@ -274,7 +314,7 @@ export class HTMLWorker extends AbstractModeWorker {
 
 		this._tagProviders.forEach((provider) => {
 			provider.collectAttributes(parentTag,(attribute, type) => {
-				var codeSnippet = attribute;
+				let codeSnippet = attribute;
 				if (type !== 'v') {
 					codeSnippet = codeSnippet + '="{{}}"';
 				}
@@ -287,11 +327,11 @@ export class HTMLWorker extends AbstractModeWorker {
 		});
 	}
 
-	private collectAttributeValueSuggestions(scanner: IHTMLScanner, suggestions:  Modes.ISuggestions): void {
-		var needsQuotes = scanner.getTokenType() === DELIM_ASSIGN;
+	private collectAttributeValueSuggestions(scanner: IHTMLScanner, suggestions:  Modes.ISuggestResult): void {
+		let needsQuotes = scanner.getTokenType() === DELIM_ASSIGN;
 
-		var attribute: string = null;
-		var parentTag: string = null;
+		let attribute: string = null;
+		let parentTag: string = null;
 		while (scanner.scanBack()) {
 			if (scanner.getTokenType() === ATTRIB_NAME) {
 				attribute = scanner.getTokenContent();
@@ -319,7 +359,7 @@ export class HTMLWorker extends AbstractModeWorker {
 		});
 	}
 
-	public suggest(resource:network.URL, position:EditorCommon.IPosition, triggerCharacter?:string):winjs.TPromise<Modes.ISuggestions[]> {
+	public suggest(resource:URI, position:EditorCommon.IPosition, triggerCharacter?:string):winjs.TPromise<Modes.ISuggestResult[]> {
 		return this._delegateToModeAtPosition(resource, position, (isEmbeddedMode, model) => {
 			if (isEmbeddedMode && model.getMode().suggestSupport) {
 				return model.getMode().suggestSupport.suggest(model.getAssociatedResource(), position, triggerCharacter);
@@ -329,21 +369,21 @@ export class HTMLWorker extends AbstractModeWorker {
 		});
 	}
 
-	public suggestHTML(resource:network.URL, position:EditorCommon.IPosition):winjs.TPromise<Modes.ISuggestions[]> {
-		return super.suggest(resource, position);
+	private suggestHTML(resource:URI, position:EditorCommon.IPosition):winjs.TPromise<Modes.ISuggestResult[]> {
+		return this.doSuggest(resource, position).then(value => filterSuggestions(value));
 	}
 
-	public doSuggest(resource: network.URL, position: EditorCommon.IPosition): winjs.TPromise<Modes.ISuggestions> {
+	private doSuggest(resource: URI, position: EditorCommon.IPosition): winjs.TPromise<Modes.ISuggestResult> {
 
-		var model = this.resourceService.get(resource),
+		let model = this.resourceService.get(resource),
 			currentWord = model.getWordUntilPosition(position).word;
 
-		var suggestions: Modes.ISuggestions = {
+		let suggestions: Modes.ISuggestResult = {
 			currentWord: currentWord,
 			suggestions: [],
 		};
 
-		var scanner = getScanner(model, position);
+		let scanner = getScanner(model, position);
 		switch (scanner.getTokenType()) {
 			case DELIM_START:
 			case DELIM_END:
@@ -397,21 +437,21 @@ export class HTMLWorker extends AbstractModeWorker {
 					this.collectTagSuggestions(scanner, position, suggestions);
 				}
 		}
-		return winjs.Promise.as(suggestions);
+		return winjs.TPromise.as(suggestions);
 	}
 
 	private findMatchingBracket(tagname: string, scanner: IHTMLScanner) : EditorCommon.IRange {
-		if (htmlTags.isEmptyElement(tagname)) {
+		if (isEmptyElement(tagname)) {
 			return null;
 		}
-		var tagCount = 0;
+		let tagCount = 0;
 		scanner.scanBack(); // one back to the end/start bracket
 		if (scanner.getTokenType() === DELIM_END) {
 			// find the opening tag
-			var tagClosed = false;
+			let tagClosed = false;
 			while (scanner.scanBack()) {
 				if (isTag(scanner.getTokenType()) && scanner.getTokenContent() === tagname && !tagClosed) {
-					var range = scanner.getTokenRange();
+					let range = scanner.getTokenRange();
 					scanner.scanBack(); // one back to the end/start bracket
 					if (scanner.getTokenType() === DELIM_START) {
 						if (tagCount === 0) {
@@ -427,7 +467,7 @@ export class HTMLWorker extends AbstractModeWorker {
 				}
 			}
 		} else {
-			var isTagEnd = false;
+			let isTagEnd = false;
 			while (scanner.scanForward()) {
 				if (isTag(scanner.getTokenType()) && scanner.getTokenContent() === tagname) {
 					if (!isTagEnd) {
@@ -456,7 +496,7 @@ export class HTMLWorker extends AbstractModeWorker {
 
 	}
 
-	public findOccurrences(resource:network.URL, position:EditorCommon.IPosition, strict:boolean = false): winjs.TPromise<Modes.IOccurence[]> {
+	public findOccurrences(resource:URI, position:EditorCommon.IPosition, strict:boolean = false): winjs.TPromise<Modes.IOccurence[]> {
 		return this._delegateToModeAtPosition(resource, position, (isEmbeddedMode, model) => {
 			if (isEmbeddedMode && model.getMode().occurrencesSupport) {
 				return model.getMode().occurrencesSupport.findOccurrences(model.getAssociatedResource(), position, strict);
@@ -466,31 +506,31 @@ export class HTMLWorker extends AbstractModeWorker {
 		});
 	}
 
-	public findOccurrencesHTML(resource:network.URL, position:EditorCommon.IPosition, strict?:boolean):winjs.TPromise<Modes.IOccurence[]> {
+	public findOccurrencesHTML(resource:URI, position:EditorCommon.IPosition, strict?:boolean):winjs.TPromise<Modes.IOccurence[]> {
 
-		var model = this.resourceService.get(resource),
+		let model = this.resourceService.get(resource),
 			wordAtPosition = model.getWordAtPosition(position),
 			currentWord = (wordAtPosition ? wordAtPosition.word : ''),
 			result:Modes.IOccurence[] = [];
 
 
-		var scanner = getScanner(model, position);
+		let scanner = getScanner(model, position);
 		if (isTag(scanner.getTokenType())) {
-			var tagname = scanner.getTokenContent();
+			let tagname = scanner.getTokenContent();
 			result.push({
 				range: scanner.getTokenRange()
 			});
-			var range = this.findMatchingBracket(tagname, scanner);
+			let range = this.findMatchingBracket(tagname, scanner);
 			if (range) {
 				result.push({
 					range: range
 				});
 			}
 		} else {
-			var words = model.getAllWordsWithRange(),
+			let words = model.getAllWordsWithRange(),
 				upperBound = Math.min(1000, words.length); // Limit find occurences to 1000 occurences
 
-			for(var i = 0; i < upperBound; i++) {
+			for(let i = 0; i < upperBound; i++) {
 				if(words[i].text === currentWord) {
 					result.push({
 						range: words[i].range
@@ -507,7 +547,7 @@ export class HTMLWorker extends AbstractModeWorker {
 			.replace(/^"([^"]+)"$/,(substr, match1) => match1);
 	}
 
-	public static _getWorkspaceUrl(modelAbsoluteUrl: network.URL, rootAbsoluteUrl: network.URL, tokenContent: string): string {
+	public static _getWorkspaceUrl(modelAbsoluteUri: URI, rootAbsoluteUri: URI, tokenContent: string): string {
 		tokenContent = HTMLWorker._stripQuotes(tokenContent);
 
 		if (/^\s*javascript\:/i.test(tokenContent) || /^\s*\#/i.test(tokenContent)) {
@@ -521,27 +561,29 @@ export class HTMLWorker extends AbstractModeWorker {
 
 		if (/^\s*\/\//i.test(tokenContent)) {
 			// Absolute link (that does not name the protocol)
-			var modelScheme = modelAbsoluteUrl.getScheme();
-			var pickedScheme = 'http';
-			if (modelScheme === network.schemas.https) {
-				pickedScheme = network.schemas.https;
+			let pickedScheme = network.Schemas.http;
+			if (modelAbsoluteUri.scheme === network.Schemas.https) {
+				pickedScheme = network.Schemas.https;
 			}
 			return pickedScheme + ':' + tokenContent.replace(/^\s*/g, '');
 		}
 
-		try {
-			var potentialResult = modelAbsoluteUrl.combine(tokenContent).toString();
-		} catch (err) {
-			// invalid URL
-			return null;
+		let modelPath = paths.dirname(modelAbsoluteUri.path);
+		let alternativeResultPath: string = null;
+		if (tokenContent.length > 0 && tokenContent.charAt(0) === '/') {
+			alternativeResultPath = tokenContent;
+		} else {
+			alternativeResultPath = paths.join(modelPath, tokenContent);
+			alternativeResultPath = alternativeResultPath.replace(/^(\/\.\.)+/, '');
 		}
+		let potentialResult = modelAbsoluteUri.withPath(alternativeResultPath).toString();
 
-		if (rootAbsoluteUrl && modelAbsoluteUrl.startsWith(rootAbsoluteUrl)) {
+		let rootAbsoluteUrlStr = (rootAbsoluteUri ? rootAbsoluteUri.toString() : null);
+		if (rootAbsoluteUrlStr && strings.startsWith(modelAbsoluteUri.toString(), rootAbsoluteUrlStr)) {
 			// The `rootAbsoluteUrl` is set and matches our current model
 			// We need to ensure that this `potentialResult` does not escape `rootAbsoluteUrl`
 
-			var rootAbsoluteUrlStr = rootAbsoluteUrl.toString();
-			var commonPrefixLength = strings.commonPrefixLength(rootAbsoluteUrlStr, potentialResult);
+			let commonPrefixLength = strings.commonPrefixLength(rootAbsoluteUrlStr, potentialResult);
 			if (strings.endsWith(rootAbsoluteUrlStr, '/')) {
 				commonPrefixLength = potentialResult.lastIndexOf('/', commonPrefixLength) + 1;
 			}
@@ -551,8 +593,8 @@ export class HTMLWorker extends AbstractModeWorker {
 		return potentialResult;
 	}
 
-	private createLink(modelAbsoluteUrl: network.URL, rootAbsoluteUrl: network.URL, tokenContent: string, lineNumber: number, startColumn: number, endColumn: number): Modes.ILink {
-		var workspaceUrl = HTMLWorker._getWorkspaceUrl(modelAbsoluteUrl, rootAbsoluteUrl, tokenContent);
+	private createLink(modelAbsoluteUrl: URI, rootAbsoluteUrl: URI, tokenContent: string, lineNumber: number, startColumn: number, endColumn: number): Modes.ILink {
+		let workspaceUrl = HTMLWorker._getWorkspaceUrl(modelAbsoluteUrl, rootAbsoluteUrl, tokenContent);
 		if (!workspaceUrl) {
 			return null;
 		}
@@ -570,7 +612,7 @@ export class HTMLWorker extends AbstractModeWorker {
 	}
 
 	private _computeHTMLLinks(model: EditorCommon.IMirrorModel): Modes.ILink[] {
-		var lineCount = model.getLineCount(),
+		let lineCount = model.getLineCount(),
 			newLinks: Modes.ILink[] = [],
 			state: LinkDetectionState = LinkDetectionState.LOOKING_FOR_HREF_OR_SRC,
 			modelAbsoluteUrl = model.getAssociatedResource(),
@@ -585,15 +627,15 @@ export class HTMLWorker extends AbstractModeWorker {
 			tokenContent: string,
 			link: Modes.ILink;
 
-		let rootAbsoluteUrl: network.URL = null;
+		let rootAbsoluteUrl: URI = null;
 		let workspace = this._contextService.getWorkspace();
 		if (workspace) {
 			// The workspace can be null in the no folder opened case
 			let strRootAbsoluteUrl = String(workspace.resource);
 			if (strRootAbsoluteUrl.charAt(strRootAbsoluteUrl.length - 1) === '/') {
-				rootAbsoluteUrl = new network.URL(strRootAbsoluteUrl);
+				rootAbsoluteUrl = URI.parse(strRootAbsoluteUrl);
 			} else {
-				rootAbsoluteUrl = new network.URL(strRootAbsoluteUrl + '/');
+				rootAbsoluteUrl = URI.parse(strRootAbsoluteUrl + '/');
 			}
 		}
 
@@ -612,13 +654,13 @@ export class HTMLWorker extends AbstractModeWorker {
 						break;
 
 					case ATTRIB_NAME:
-						if (state === LinkDetectionState.LOOKING_FOR_HREF_OR_SRC) {
-							nextTokenEndIndex = tokens.getTokenEndIndex(i, lineContentLength);
-							tokenContent = lineContent.substring(tokens.getTokenStartIndex(i), nextTokenEndIndex).toLowerCase();
+						nextTokenEndIndex = tokens.getTokenEndIndex(i, lineContentLength);
+						tokenContent = lineContent.substring(tokens.getTokenStartIndex(i), nextTokenEndIndex).toLowerCase();
 
-							if (tokenContent === 'src' || tokenContent === 'href') {
-								state = LinkDetectionState.AFTER_HREF_OR_SRC;
-							}
+						if (tokenContent === 'src' || tokenContent === 'href') {
+							state = LinkDetectionState.AFTER_HREF_OR_SRC;
+						} else {
+							state = LinkDetectionState.LOOKING_FOR_HREF_OR_SRC;
 						}
 						break;
 
@@ -648,60 +690,12 @@ export class HTMLWorker extends AbstractModeWorker {
 		return newLinks;
 	}
 
-	public computeLinks(resource: network.URL): winjs.TPromise<Modes.ILink[]> {
-
-		return super.computeLinks(resource).then((oldLinks) => {
-
-			var model = this.resourceService.get(resource);
-
-			var newLinks = this._computeHTMLLinks(model);
-
-			// reunite oldLinks with newLinks and remove duplicates
-			var result: Modes.ILink[] = [],
-				oldIndex: number,
-				oldLen: number,
-				newIndex: number,
-				newLen: number,
-				oldLink: Modes.ILink,
-				newLink: Modes.ILink,
-				comparisonResult: number;
-
-			for (oldIndex = 0, newIndex = 0, oldLen = oldLinks.length, newLen = newLinks.length; oldIndex < oldLen && newIndex < newLen;) {
-				oldLink = oldLinks[oldIndex];
-				newLink = newLinks[newIndex];
-
-				if (Range.areIntersectingOrTouching(oldLink.range, newLink.range)) {
-					// Remove the oldLink
-					oldIndex++;
-					continue;
-				}
-
-				comparisonResult = Range.compareRangesUsingStarts(oldLink.range, newLink.range);
-
-				if (comparisonResult < 0) {
-					// oldLink is before
-					result.push(oldLink);
-					oldIndex++;
-				} else {
-					// newLink is before
-					result.push(newLink);
-					newIndex++;
-				}
-			}
-
-			for (; oldIndex < oldLen; oldIndex++) {
-				result.push(oldLinks[oldIndex]);
-			}
-			for (; newIndex < newLen; newIndex++) {
-				result.push(newLinks[newIndex]);
-			}
-
-			return result;
-		});
+	public computeLinks(resource: URI): winjs.TPromise<Modes.ILink[]> {
+		let model = this.resourceService.get(resource);
+		return winjs.TPromise.as(this._computeHTMLLinks(model));
 	}
 }
 
 function isWhiteSpace(s:string) : boolean {
 	return /^\s*$/.test(s);
 }
-

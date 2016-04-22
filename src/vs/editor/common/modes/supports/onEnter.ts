@@ -4,16 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
+import {onUnexpectedError} from 'vs/base/common/errors';
+import * as strings from 'vs/base/common/strings';
+import {Position} from 'vs/editor/common/core/position';
+import {IPosition, ITextModel, ITokenizedModel} from 'vs/editor/common/editorCommon';
+import {IEnterAction, ILineContext, IMode, IRichEditOnEnter, IndentAction, CharacterPair} from 'vs/editor/common/modes';
 import {handleEvent} from 'vs/editor/common/modes/supports';
-import {IEnterAction, IndentAction, IOnEnterSupport, ILineContext, IMode} from 'vs/editor/common/modes';
-import EditorCommon = require('vs/editor/common/editorCommon');
-import Errors = require('vs/base/common/errors');
-import Strings = require('vs/base/common/strings');
-
-export interface IBracketPair {
-	open: string;
-	close: string;
-}
 
 export interface IIndentationRules {
 	decreaseIndentPattern: RegExp;
@@ -29,17 +25,19 @@ export interface IOnEnterRegExpRules {
 }
 
 export interface IOnEnterSupportOptions {
-	brackets?: IBracketPair[];
+	brackets?: CharacterPair[];
 	indentationRules?: IIndentationRules;
 	regExpRules?: IOnEnterRegExpRules[];
 }
 
-interface IProcessedBracketPair extends IBracketPair {
+interface IProcessedBracketPair {
+	open: string;
+	close: string;
 	openRegExp: RegExp;
 	closeRegExp: RegExp;
 }
 
-export class OnEnterSupport implements IOnEnterSupport {
+export class OnEnterSupport implements IRichEditOnEnter {
 
 	private static _INDENT: IEnterAction = { indentAction: IndentAction.Indent };
 	private static _INDENT_OUTDENT: IEnterAction = { indentAction: IndentAction.IndentOutdent };
@@ -53,39 +51,39 @@ export class OnEnterSupport implements IOnEnterSupport {
 	constructor(modeId: string, opts?:IOnEnterSupportOptions) {
 		opts = opts || {};
 		opts.brackets = opts.brackets || [
-			{ open: '(', close: ')' },
-			{ open: '{', close: '}' },
-			{ open: '[', close: ']' }
+			['(', ')'],
+			['{', '}'],
+			['[', ']']
 		];
 
 		this._modeId = modeId;
 		this._brackets = opts.brackets.map((bracket) => {
 			return {
-				open: bracket.open,
-				openRegExp: OnEnterSupport._createOpenBracketRegExp(bracket.open),
-				close: bracket.close,
-				closeRegExp: OnEnterSupport._createCloseBracketRegExp(bracket.close),
+				open: bracket[0],
+				openRegExp: OnEnterSupport._createOpenBracketRegExp(bracket[0]),
+				close: bracket[1],
+				closeRegExp: OnEnterSupport._createCloseBracketRegExp(bracket[1]),
 			};
 		});
 		this._regExpRules = opts.regExpRules || [];
 		this._indentationRules = opts.indentationRules;
 	}
 
-	public onEnter(model:EditorCommon.ITokenizedModel, position: EditorCommon.IPosition): IEnterAction {
+	public onEnter(model:ITokenizedModel, position: IPosition): IEnterAction {
 		var context = model.getLineContext(position.lineNumber);
 
 		return handleEvent(context, position.column - 1, (nestedMode:IMode, context:ILineContext, offset:number) => {
 			if (this._modeId === nestedMode.getId()) {
 				return this._onEnter(model, position);
-			} else if (nestedMode.onEnterSupport) {
-				return nestedMode.onEnterSupport.onEnter(model, position);
+			} else if (nestedMode.richEditSupport && nestedMode.richEditSupport.onEnter) {
+				return nestedMode.richEditSupport.onEnter.onEnter(model, position);
 			} else {
 				return null;
 			}
 		});
 	}
 
-	private _onEnter(model:EditorCommon.ITextModel, position: EditorCommon.IPosition): IEnterAction {
+	private _onEnter(model:ITextModel, position: IPosition): IEnterAction {
 		let lineText = model.getLineContent(position.lineNumber);
 		let beforeEnterText = lineText.substr(0, position.column - 1);
 		let afterEnterText = lineText.substr(position.column - 1);
@@ -139,7 +137,7 @@ export class OnEnterSupport implements IOnEnterSupport {
 			}
 		}
 
-		// (4): Open Bracket based logic
+		// (4): Open bracket based logic
 		if (beforeEnterText.length > 0) {
 			for (let i = 0, len = this._brackets.length; i < len; i++) {
 				let bracket = this._brackets[i];
@@ -153,7 +151,7 @@ export class OnEnterSupport implements IOnEnterSupport {
 	}
 
 	private static _createOpenBracketRegExp(bracket:string): RegExp {
-		var str = Strings.escapeRegExpCharacters(bracket);
+		var str = strings.escapeRegExpCharacters(bracket);
 		if (!/\B/.test(str.charAt(0))) {
 			str = '\\b' + str;
 		}
@@ -162,7 +160,7 @@ export class OnEnterSupport implements IOnEnterSupport {
 	}
 
 	private static _createCloseBracketRegExp(bracket:string): RegExp {
-		var str = Strings.escapeRegExpCharacters(bracket);
+		var str = strings.escapeRegExpCharacters(bracket);
 		if (!/\B/.test(str.charAt(str.length - 1))) {
 			str = str + '\\b';
 		}
@@ -174,8 +172,59 @@ export class OnEnterSupport implements IOnEnterSupport {
 		try {
 			return new RegExp(def);
 		} catch(err) {
-			Errors.onUnexpectedError(err);
+			onUnexpectedError(err);
 			return null;
 		}
 	}
+}
+
+export function getRawEnterActionAtPosition(model:ITokenizedModel, lineNumber:number, column:number): IEnterAction {
+	let result:IEnterAction;
+	let richEditSupport = model.getMode().richEditSupport;
+
+	if (richEditSupport && richEditSupport.onEnter) {
+		try {
+			result = richEditSupport.onEnter.onEnter(model, new Position(lineNumber, column));
+		} catch (e) {
+			onUnexpectedError(e);
+		}
+	}
+
+	return result;
+}
+
+export function getEnterActionAtPosition(model:ITokenizedModel, lineNumber:number, column:number): { enterAction: IEnterAction; indentation: string; } {
+	let lineText = model.getLineContent(lineNumber);
+	let indentation = strings.getLeadingWhitespace(lineText);
+	if (indentation.length > column - 1) {
+		indentation = indentation.substring(0, column - 1);
+	}
+
+	let enterAction = getRawEnterActionAtPosition(model, lineNumber, column);
+	if (!enterAction) {
+		enterAction = {
+			indentAction: IndentAction.None,
+			appendText: '',
+		};
+	} else {
+		if(!enterAction.appendText) {
+			if (
+				(enterAction.indentAction === IndentAction.Indent) ||
+				(enterAction.indentAction === IndentAction.IndentOutdent)
+			) {
+				enterAction.appendText = '\t';
+			} else {
+				enterAction.appendText = '';
+			}
+		}
+	}
+
+	if (enterAction.removeText) {
+		indentation = indentation.substring(0, indentation.length - 1);
+	}
+
+	return {
+		enterAction: enterAction,
+		indentation: indentation
+	};
 }

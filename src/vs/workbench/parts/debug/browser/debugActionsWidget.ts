@@ -13,14 +13,14 @@ import actionbar = require('vs/base/browser/ui/actionbar/actionbar');
 import constants = require('vs/workbench/common/constants');
 import wbext = require('vs/workbench/common/contributions');
 import debug = require('vs/workbench/parts/debug/common/debug');
-import dbgactions = require('vs/workbench/parts/debug/browser/debugActions');
+import dbgactions = require('vs/workbench/parts/debug/electron-browser/debugActions');
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IMessageService } from 'vs/platform/message/common/message';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 
 import IDebugService = debug.IDebugService;
 
-var $ = builder.$;
+const $ = builder.$;
 
 export class DebugActionsWidget implements wbext.IWorkbenchContribution {
 	private static ID = 'debug.actionsWidget';
@@ -55,16 +55,16 @@ export class DebugActionsWidget implements wbext.IWorkbenchContribution {
 	}
 
 	private registerListeners(): void {
-		this.toDispose.push(this.debugService.addListener2(debug.ServiceEvents.STATE_CHANGED, () => {
-			this.onDebugStateChange();
+		this.toDispose.push(this.debugService.onDidChangeState(state => {
+			this.onDebugStateChange(state);
 		}));
 		this.toDispose.push(this.actionBar.actionRunner.addListener2(events.EventType.RUN, (e: any) => {
-			// Check for Error
+			// check for error
 			if (e.error && !errors.isPromiseCanceledError(e.error)) {
 				this.messageService.show(severity.Error, e.error);
 			}
 
-			// Log in telemetry
+			// log in telemetry
 			if (this.telemetryService) {
 				this.telemetryService.publicLog('workbenchActionExecuted', { id: e.action.id, from: 'debugActionsWidget' });
 			}
@@ -75,13 +75,13 @@ export class DebugActionsWidget implements wbext.IWorkbenchContribution {
 		return DebugActionsWidget.ID;
 	}
 
-	private onDebugStateChange(): void {
-		if (this.debugService.getState() === debug.State.Inactive) {
+	private onDebugStateChange(state: debug.State): void {
+		if (state === debug.State.Disabled || state === debug.State.Inactive || state === debug.State.Initializing) {
 			return this.hide();
 		}
 
 		this.actionBar.clear();
-		this.actionBar.push(this.getActions(this.instantiationService, this.debugService.getState()), { icon: true, label: false });
+		this.actionBar.push(this.getActions(this.instantiationService, this.debugService.state), { icon: true, label: false });
 		this.show();
 	}
 
@@ -127,7 +127,7 @@ export class DebugActionsWidget implements wbext.IWorkbenchContribution {
 	}
 
 	public dispose(): void {
-		this.toDispose = lifecycle.disposeAll(this.toDispose);
+		this.toDispose = lifecycle.dispose(this.toDispose);
 
 		if (this.$el) {
 			this.$el.destroy();

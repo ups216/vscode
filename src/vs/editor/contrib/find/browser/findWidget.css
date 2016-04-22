@@ -28,10 +28,6 @@
 	background-color: black;
 }
 
-.monaco-checkbox .checkbox:focus + .label {
-	outline: auto 5px rgb(229, 151, 0);
-}
-
 /* Find widget */
 .monaco-editor .find-widget {
 	position: absolute;
@@ -76,9 +72,13 @@
 
 .monaco-editor .find-widget .replace-input .input {
 	font-size: 13px;
-	font-family: "Segoe UI", "SFUIText-Light", "HelveticaNeue-Light", sans-serif, "Droid Sans Fallback";
 }
 
+.monaco-editor .find-widget .replace-input .input, .monaco-editor .find-widget .matchesCount { font-family: "Segoe UI", "SFUIText-Light", "HelveticaNeue-Light", sans-serif, "Droid Sans Fallback"; }
+.monaco-editor:lang(zh-Hans) .find-widget .replace-input .input, .monaco-editor:lang(zh-Hans) .find-widget .matchesCount { font-family: "Segoe UI", "SFUIText-Light", "HelveticaNeue-Light", "Noto Sans", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Source Han Sans SC", "Source Han Sans CN", "Source Han Sans", sans-serif; }
+.monaco-editor:lang(zh-Hant) .find-widget .replace-input .input, .monaco-editor:lang(zh-Hant) .find-widget .matchesCount { font-family: "Segoe UI", "SFUIText-Light", "HelveticaNeue-Light", "Noto Sans", "Microsoft Jhenghei", "PingFang TC", "Source Han Sans TC", "Source Han Sans", "Source Han Sans TW", sans-serif; }
+.monaco-editor:lang(ja) .find-widget .replace-input .input, .monaco-editor:lang(ja) .find-widget .matchesCount { font-family: "Segoe UI", "SFUIText-Light", "HelveticaNeue-Light", "Noto Sans", "Meiryo", "Hiragino Kaku Gothic Pro", "Source Han Sans J", "Source Han Sans JP", "Source Han Sans", "Sazanami Gothic", "IPA Gothic", sans-serif; }
+.monaco-editor:lang(ko) .find-widget .replace-input .input, .monaco-editor:lang(ko) .find-widget .matchesCount { font-family: "Segoe UI", "SFUIText-Light", "HelveticaNeue-Light", "Noto Sans", "Malgun Gothic", "Nanum Gothic", "Dotom", "Apple SD Gothic Neo", "AppleGothic", "Source Han Sans K", "Source Han Sans JR", "Source Han Sans", "UnDotum", "FBaekmuk Gulim", sans-serif; }
 
 
 .monaco-editor .find-widget.visible.noanimation {
@@ -111,8 +111,23 @@
 	vertical-align: middle;
 }
 
-.monaco-editor .find-widget.no-results .monaco-findInput .monaco-inputbox {
-	border-color: #E51400;
+.monaco-editor .find-widget.no-results .matchesCount {
+	background-color: rgba(255,0,0,0.5);
+}
+.monaco-editor.vs-dark .find-widget.no-results .matchesCount {
+	background-color: rgba(255,0,0,0.3);
+}
+
+.monaco-editor .find-widget .matchesCount {
+	display: inline-block;
+	margin: 0 1px 0 3px;
+	padding: 2px 2px 0 2px;
+	min-width: 69px;
+	height: 25px;
+	vertical-align: middle;
+	box-sizing: border-box;
+	text-align: center;
+	line-height: 23px;
 }
 
 .monaco-editor .find-widget .button {
@@ -142,7 +157,6 @@
 }
 
 .monaco-editor .find-widget .button.toggle {
-	display: none;
 	position: absolute;
 	top: 0;
 	left: 0;
@@ -155,16 +169,16 @@
 	box-sizing:			border-box;
 }
 
-.monaco-editor .find-widget.can-replace .button.toggle {
-	display: inherit;
+.monaco-editor .find-widget .button.toggle.disabled {
+	display: none;
 }
 
 .monaco-editor .find-widget .previous {
-	background-image: url('previous.svg');
+	background-image: url('images/previous.svg');
 }
 
 .monaco-editor .find-widget .next {
-	background-image: url('next.svg');
+	background-image: url('images/next.svg');
 }
 
 .monaco-editor .find-widget .disabled {
@@ -185,7 +199,7 @@
 	display: inline-block;
 	background-repeat: no-repeat;
 	background-position: 0 0;
-	background-image: url('cancelSelectionFind.svg');
+	background-image: url('images/cancelSelectionFind.svg');
 	width: 20px;
 	height: 20px;
 	border: none;
@@ -208,23 +222,23 @@
 }
 
 .monaco-editor .find-widget .close-fw {
-	background-image: url('close.svg');
+	background-image: url('images/close.svg');
 }
 
 .monaco-editor .find-widget .expand {
-	background-image: url('expando-expanded.svg');
+	background-image: url('images/expando-expanded.svg');
 }
 
 .monaco-editor .find-widget .collapse {
-	background-image: url('expando-collapsed.svg');
+	background-image: url('images/expando-collapsed.svg');
 }
 
 .monaco-editor .find-widget .replace {
-	background-image: url('replace.svg');
+	background-image: url('images/replace.svg');
 }
 
 .monaco-editor .find-widget .replace-all {
-	background-image: url('replace-all.svg');
+	background-image: url('images/replace-all.svg');
 }
 
 .monaco-editor .find-widget > .replace-part {
@@ -272,15 +286,15 @@
 }
 
 .monaco-editor.vs-dark .find-widget .previous {
-	background-image: url('previous-inverse.svg');
+	background-image: url('images/previous-inverse.svg');
 }
 
 .monaco-editor.vs-dark .find-widget .next {
-	background-image: url('next-inverse.svg');
+	background-image: url('images/next-inverse.svg');
 }
 
 .monaco-editor.vs-dark .find-widget .monaco-checkbox .label {
-	background-image: url('cancelSelectionFind-inverse.svg');
+	background-image: url('images/cancelSelectionFind-inverse.svg');
 }
 
 .monaco-editor.vs-dark .find-widget .monaco-checkbox .checkbox:not(:disabled):hover:before + .label {
@@ -292,23 +306,23 @@
 }
 
 .monaco-editor.vs-dark .find-widget .close-fw {
-	background-image: url('close-dark.svg');
+	background-image: url('images/close-dark.svg');
 }
 
 .monaco-editor.vs-dark .find-widget .replace {
-	background-image: url('replace-inverse.svg');
+	background-image: url('images/replace-inverse.svg');
 }
 
 .monaco-editor.vs-dark .find-widget .replace-all {
-	background-image: url('replace-all-inverse.svg');
+	background-image: url('images/replace-all-inverse.svg');
 }
 
 .monaco-editor.vs-dark .find-widget .expand {
-	background-image: url('expando-expanded-dark.svg');
+	background-image: url('images/expando-expanded-dark.svg');
 }
 
 .monaco-editor.vs-dark .find-widget .collapse {
-	background-image: url('expando-collapsed-dark.svg');
+	background-image: url('images/expando-collapsed-dark.svg');
 }
 
 .monaco-editor.vs-dark .find-widget .button:not(.disabled):hover {
@@ -350,23 +364,23 @@
 }
 
 .monaco-editor.hc-black .find-widget .previous:before {
-	content: url('previous-inverse.svg');
+	content: url('images/previous-inverse.svg');
 }
 
 .monaco-editor.hc-black .find-widget .next:before {
-	content: url('next-inverse.svg');
+	content: url('images/next-inverse.svg');
 }
 
 .monaco-editor.hc-black .find-widget .replace:before {
-	content: url('replace-inverse.svg');
+	content: url('images/replace-inverse.svg');
 }
 
 .monaco-editor.hc-black .find-widget .replace-all:before {
-	content: url('replace-all-inverse.svg');
+	content: url('images/replace-all-inverse.svg');
 }
 
 .monaco-editor.hc-black .find-widget .monaco-checkbox .label {
-	content: url('cancelSelectionFind-inverse.svg');
+	content: url('images/cancelSelectionFind-inverse.svg');
 	top: 1px;
 	left: 2px;
 }
@@ -376,26 +390,26 @@
 }
 
 .monaco-editor.hc-black .find-widget .close-fw:before {
-	content: url('close-dark.svg');
+	content: url('images/close-dark.svg');
 	top: 1px;
 	left: 0px;
 }
 
 .monaco-editor.hc-black .find-widget .expand:before {
-	content: url('expando-expanded-dark.svg');
+	content: url('images/expando-expanded-dark.svg');
 	top: 38%;
 	left: 40%
 }
 
 .monaco-editor.hc-black .find-widget .collapse:before {
-	content: url('expando-collapsed-dark.svg');
+	content: url('images/expando-collapsed-dark.svg');
 	top: 30%;
 	left: 40%;
 }
 
 .monaco-editor.hc-black .findMatch {
 	background: none;
-	border: 1px dotted #DF740C;
+	border: 1px dotted #f38518;
 	-moz-box-sizing: border-box;
 	box-sizing: border-box;
 }
@@ -403,14 +417,14 @@
 .monaco-editor.hc-black .currentFindMatch {
 	background: none;
 	padding: 1px;
-	border: 2px solid #DF740C;
+	border: 2px solid #f38518;
 	-moz-box-sizing: border-box;
 	box-sizing: border-box;
 }
 
 .monaco-editor.hc-black .findScope {
 	background: none;
-	border: 1px dashed #DF740C;
+	border: 1px dashed #f38518;
 	opacity: .4;
 }
 

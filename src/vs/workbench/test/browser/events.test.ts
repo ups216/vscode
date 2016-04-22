@@ -10,13 +10,13 @@ import URI from 'vs/base/common/uri';
 import * as Paths from 'vs/base/common/paths';
 import * as Files from 'vs/platform/files/common/files';
 import {Event, PropertyChangeEvent} from 'vs/base/common/events';
-import {CommandEvent, EditorEvent, ViewletEvent} from 'vs/workbench/browser/events';
+import {CommandEvent, CompositeEvent, EditorEvent} from 'vs/workbench/common/events';
 
 let FileChangesEvent = Files.FileChangesEvent;
 
-suite("Workbench Events", () => {
+suite('Workbench Events', () => {
 
-	test("Base Event", function() {
+	test('Base Event', function () {
 		let origEvent: any = {};
 		let event = new Event(origEvent);
 
@@ -24,8 +24,8 @@ suite("Workbench Events", () => {
 		assert(event.time);
 	});
 
-	test("Command Event", function() {
-		let actionId = "foo.bar";
+	test('Command Event', function () {
+		let actionId = 'foo.bar';
 		let origEvent = {};
 		let event = new CommandEvent(actionId, origEvent);
 
@@ -34,12 +34,12 @@ suite("Workbench Events", () => {
 		assert(event.time);
 	});
 
-	test("Editor Change Event", function() {
+	test('Editor Change Event', function () {
 		let editor: any = {};
 		let origEvent: any = {};
 		let input: any = {};
 		let options: any = {};
-		let id = "foo.bar";
+		let id = 'foo.bar';
 		let event = new EditorEvent(editor, id, input, options, 0, origEvent);
 
 		assert.strictEqual(event.editor, editor);
@@ -50,11 +50,11 @@ suite("Workbench Events", () => {
 		assert(event.time);
 	});
 
-	test("Property Change Event", function() {
-		let key = "foo";
+	test('Property Change Event', function () {
+		let key = 'foo';
 		let origEvent: any = {};
-		let oldValue = { foo: "bar" };
-		let newValue = { foo: "foo" };
+		let oldValue = { foo: 'bar' };
+		let newValue = { foo: 'foo' };
 		let event = new PropertyChangeEvent(key, oldValue, newValue, origEvent);
 
 		assert.strictEqual(event.originalEvent, origEvent);
@@ -64,7 +64,7 @@ suite("Workbench Events", () => {
 		assert(event.time);
 	});
 
-	test("File Changes Event", function() {
+	test('File Changes Event', function () {
 		let changes = [
 			{ resource: URI.file(Paths.join('C:\\', '/foo/updated.txt')), type: 0 },
 			{ resource: URI.file(Paths.join('C:\\', '/foo/otherupdated.txt')), type: 0 },
@@ -98,13 +98,13 @@ suite("Workbench Events", () => {
 		return URI.file(Paths.join('C:\\', path));
 	}
 
-	test("Viewlet Event", function() {
-		let viewletId = "foo.bar";
+	test('Composite Event', function () {
+		let compositeId = 'foo.bar';
 		let origEvent = {};
-		let event = new ViewletEvent(viewletId, origEvent);
+		let event = new CompositeEvent(compositeId, origEvent);
 
 		assert.strictEqual(event.originalEvent, origEvent);
-		assert.strictEqual(event.viewletId, viewletId);
+		assert.strictEqual(event.compositeId, compositeId);
 		assert(event.time);
 	});
 });

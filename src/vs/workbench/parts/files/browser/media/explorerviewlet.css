@@ -9,7 +9,7 @@
 }
 
 .explorer-viewlet .explorer-item, .explorer-viewlet .working-files-item {
-	line-height: 24px;
+	line-height: 22px;
 }
 
 .explorer-viewlet .explorer-item-label, .explorer-viewlet .working-files-item-label {
@@ -27,6 +27,7 @@
 
 .explorer-viewlet .explorer-working-files .monaco-tree .monaco-tree-row > .content.actions.working-file-dirty > .primary-action-bar {
 	display: block;
+	width: initial;
 }
 
 .explorer-viewlet .explorer-working-files .monaco-tree .monaco-tree-row > .content.actions > .sub-content {
@@ -34,8 +35,9 @@
 }
 
 .explorer-viewlet .monaco-count-badge {
-	padding: 0 6px;
-	display: inline-block;
+	padding: 1px 6px;
+	margin-left: 6px;
+	border-radius: 0; /* goes better when ellipsis shows up on narrow sidebar */
 }
 
 .explorer-viewlet .explorer-empty-view {
@@ -64,11 +66,11 @@
 }
 
 /* Theming */
-.monaco-workbench.vs-dark .explorer-viewlet .collapsible.header .action-close-all-files {
+.vs-dark .monaco-workbench .explorer-viewlet .collapsible.header .action-close-all-files {
 	background: url("closeall_inverse.svg") center center no-repeat;
 }
 
 /* High Contrast Theming */
-.monaco-workbench.hc-black .explorer-viewlet .explorer-item, .monaco-workbench.hc-black .explorer-viewlet .working-files-item {
+.hc-black .monaco-workbench .explorer-viewlet .explorer-item, .hc-black .monaco-workbench .explorer-viewlet .working-files-item {
 	line-height: 20px;
 }
