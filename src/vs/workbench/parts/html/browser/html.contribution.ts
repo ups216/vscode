@@ -28,15 +28,16 @@ import {SyncDescriptor} from 'vs/platform/instantiation/common/descriptors';
 KeybindingsRegistry.registerCommandDesc({
 	id: '_workbench.previewHtml',
 	weight: KeybindingsRegistry.WEIGHT.workbenchContrib(0),
-	handler(accessor: ServicesAccessor, args: [URI|string, EditorPosition]) {
+	handler(accessor: ServicesAccessor, resource: URI | string, position?: EditorPosition, title?: { label?: string; description?: string }) {
 
-		let [resource, position] = args;
 		let uri = resource instanceof URI ? resource : URI.parse(resource);
-		let input = accessor.get(IInstantiationService).createInstance(HtmlInput, uri.fsPath, undefined, uri);
+		let {label, description} = !title ? { label: uri.fsPath, description: void 0 } : title;
+		let input = accessor.get(IInstantiationService).createInstance(HtmlInput, label, description, uri);
 
-		return accessor.get(IWorkbenchEditorService).openEditor(input, null, position)
+		return accessor.get(IWorkbenchEditorService)
+			.openEditor(input, { pinned: true }, position)
 			.then(editor => true);
 	},
-	context: undefined,
+	when: undefined,
 	primary: undefined
 });

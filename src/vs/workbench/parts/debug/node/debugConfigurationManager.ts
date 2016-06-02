@@ -5,8 +5,10 @@
 
 import path = require('path');
 import nls = require('vs/nls');
+import { sequence } from 'vs/base/common/async';
 import { TPromise } from 'vs/base/common/winjs.base';
 import strings = require('vs/base/common/strings');
+import {isLinux, isMacintosh, isWindows} from 'vs/base/common/platform';
 import Event, { Emitter } from 'vs/base/common/event';
 import objects = require('vs/base/common/objects');
 import uri from 'vs/base/common/uri';
@@ -20,6 +22,7 @@ import jsonContributionRegistry = require('vs/platform/jsonschemas/common/jsonCo
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { IFileService } from 'vs/platform/files/common/files';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
+import { IKeybindingService } from 'vs/platform/keybinding/common/keybindingService';
 import debug = require('vs/workbench/parts/debug/common/debug');
 import { SystemVariables } from 'vs/workbench/parts/lib/node/systemVariables';
 import { Adapter } from 'vs/workbench/parts/debug/node/debugAdapter';
@@ -73,6 +76,10 @@ export var debuggersExtPoint = extensionsRegistry.ExtensionsRegistry.registerExt
 			runtimeArgs : {
 				description: nls.localize('vscode.extension.contributes.debuggers.runtimeArgs', "Optional runtime arguments."),
 				type: 'array'
+			},
+			variables : {
+				description: nls.localize('vscode.extension.contributes.debuggers.variables', "Mapping from interactive variables (e.g ${action.pickProcess}) in `launch.json` to a command."),
+				type: 'object'
 			},
 			initialConfigurations: {
 				description: nls.localize('vscode.extension.contributes.debuggers.initialConfigurations', "Configurations for generating the initial \'launch.json\'."),
@@ -158,7 +165,8 @@ export class ConfigurationManager implements debug.IConfigurationManager {
 		@ITelemetryService private telemetryService: ITelemetryService,
 		@IWorkbenchEditorService private editorService: IWorkbenchEditorService,
 		@IConfigurationService private configurationService: IConfigurationService,
-		@IQuickOpenService private quickOpenService: IQuickOpenService
+		@IQuickOpenService private quickOpenService: IQuickOpenService,
+		@IKeybindingService private keybindingService: IKeybindingService
 	) {
 		this._onDidConfigurationChange = new Emitter<string>();
 		this.systemVariables = this.contextService.getWorkspace() ? new SystemVariables(this.editorService, this.contextService) : null;
@@ -173,7 +181,7 @@ export class ConfigurationManager implements debug.IConfigurationManager {
 
 			extensions.forEach(extension => {
 				extension.value.forEach(rawAdapter => {
-					const adapter = new Adapter(rawAdapter, this.systemVariables, extension.description.extensionFolderPath);
+					const adapter = new Adapter(rawAdapter, this.systemVariables, extension.description);
 					const duplicate = this.adapters.filter(a => a.type === adapter.type)[0];
 					if (!rawAdapter.type || (typeof rawAdapter.type !== 'string')) {
 						extension.collector.error(nls.localize('debugNoType', "Debug adapter 'type' can not be omitted and must be of type 'string'."));
@@ -184,7 +192,7 @@ export class ConfigurationManager implements debug.IConfigurationManager {
 							if (adapter[attribute]) {
 								if (attribute === 'enableBreakpointsFor') {
 									Object.keys(adapter.enableBreakpointsFor).forEach(languageId => duplicate.enableBreakpointsFor[languageId] = true);
-								} else if (duplicate[attribute] && attribute !== 'type') {
+								} else if (duplicate[attribute] && attribute !== 'type' && attribute !== 'extensionDescription') {
 									// give priority to the later registered extension.
 									duplicate[attribute] = adapter[attribute];
 									extension.collector.error(nls.localize('duplicateDebuggerType', "Debug type '{0}' is already registered and has attribute '{1}', ignoring attribute '{1}'.", adapter.type, attribute));
@@ -225,28 +233,84 @@ export class ConfigurationManager implements debug.IConfigurationManager {
 	}
 
 	public get adapter(): Adapter {
+		if (!this.configuration || !this.configuration.type) {
+			return null;
+		}
+
 		return this.adapters.filter(adapter => strings.equalsIgnoreCase(adapter.type, this.configuration.type)).pop();
 	}
 
-	public setConfiguration(name: string): TPromise<void> {
+	/**
+	 * Resolve all interactive variables in configuration #6569
+	 */
+	public resolveInteractiveVariables(): TPromise<debug.IConfig>  {
+		if (!this.configuration) {
+			return TPromise.as(null);
+		}
+
+		const factory = Object.keys(this.configuration).map(key => {
+			return () => {
+				if (typeof this.configuration[key] === 'string') {
+					const matches = /\${action.(.+)}/.exec(this.configuration[key]);
+					if (matches && matches.length === 2) {
+						const commandId = this.adapter.variables[matches[1]];
+						if (!commandId) {
+							return TPromise.wrapError(nls.localize('interactiveVariableNotFound', "Adapter {0} does not contribute variable {1} that is specified in launch configuration.", this.adapter.type, matches[1]));
+						} else {
+							return this.keybindingService.executeCommand<string>(commandId, this.configuration)
+								.then(result => result ? this.configuration[key] = result : this.configuration.silentlyAbort = true);
+						}
+					}
+				}
+
+				return TPromise.as(null);
+			};
+		});
+
+		return sequence(factory).then(() => this.configuration);
+	}
+
+	public setConfiguration(nameOrConfig: string|debug.IConfig): TPromise<void> {
 		return this.loadLaunchConfig().then(config => {
-			if (!config || !config.configurations) {
+			if (typeof nameOrConfig === 'string' && (!config || !config.configurations)) {
 				this.configuration = null;
 				return;
 			}
 
-			// if the configuration name is not set yet, take the first launch config (can happen if debug viewlet has not been opened yet).
-			const filtered = name ? config.configurations.filter(cfg => cfg.name === name) : [config.configurations[0]];
+			if (typeof nameOrConfig === 'string') {
+				// if the configuration name is not set yet, take the first launch config (can happen if debug viewlet has not been opened yet).
+				const filtered = nameOrConfig ? config.configurations.filter(cfg => cfg.name === nameOrConfig) : [config.configurations[0]];
+
+				this.configuration = filtered.length === 1 ? objects.deepClone(filtered[0]) : null;
+				if (config && this.configuration) {
+					this.configuration.debugServer = config.debugServer;
+				}
+			} else {
+				this.configuration = objects.deepClone(nameOrConfig);
+			}
+
+			// Set operating system specific properties #1873
+			if (isWindows && this.configuration.windows) {
+				Object.keys(this.configuration.windows).forEach(key => {
+					this.configuration[key] = this.configuration.windows[key];
+				});
+			}
+			if (isMacintosh && this.configuration.osx) {
+				Object.keys(this.configuration.osx).forEach(key => {
+					this.configuration[key] = this.configuration.osx[key];
+				});
+			}
+			if (isLinux && this.configuration.linux) {
+				Object.keys(this.configuration.linux).forEach(key => {
+					this.configuration[key] = this.configuration.linux[key];
+				});
+			}
 
 			// massage configuration attributes - append workspace path to relatvie paths, substitute variables in paths.
-			this.configuration = filtered.length === 1 ? objects.deepClone(filtered[0]) : null;
-			if (this.configuration) {
-				if (this.systemVariables) {
-					Object.keys(this.configuration).forEach(key => {
-						this.configuration[key] = this.systemVariables.resolveAny(this.configuration[key]);
-					});
-				}
-				this.configuration.debugServer = config.debugServer;
+			if (this.configuration && this.systemVariables) {
+				Object.keys(this.configuration).forEach(key => {
+					this.configuration[key] = this.systemVariables.resolveAny(this.configuration[key]);
+				});
 			}
 		}).then(() => this._onDidConfigurationChange.fire(this.configurationName));
 	}
@@ -332,7 +396,7 @@ export class ConfigurationManager implements debug.IConfigurationManager {
 	}
 
 	public canSetBreakpointsIn(model: editor.IModel): boolean {
-		if (model.getAssociatedResource().scheme === Schemas.inMemory) {
+		if (model.uri.scheme === Schemas.inMemory) {
 			return false;
 		}
 

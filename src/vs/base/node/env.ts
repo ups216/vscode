@@ -5,7 +5,6 @@
 
 'use strict';
 
-import platform = require('vs/base/common/platform');
 import { TPromise } from 'vs/base/common/winjs.base';
 import cp = require('child_process');
 
@@ -13,11 +12,7 @@ export interface IEnv {
 	[key: string]: string;
 }
 
-export function getUserEnvironment(): TPromise<IEnv> {
-	if (platform.isWindows) {
-		return TPromise.as({});
-	}
-
+export function getUnixUserEnvironment(): TPromise<IEnv> {
 	return new TPromise((c, e) => {
 		let child = cp.spawn(process.env.SHELL, ['-ilc', 'env'], {
 			detached: true,
@@ -42,8 +37,9 @@ export function getUserEnvironment(): TPromise<IEnv> {
 
 /**
  * Parse output from `env`, attempting to retain any multiple-line variables.
+ * Exported for use in tests.
  */
-export function parseEnvOutput(output): IEnv {
+export function parseEnvOutput(output: string): IEnv {
 	let result: IEnv = Object.create(null);
 	let vars = output.split('\n');
 

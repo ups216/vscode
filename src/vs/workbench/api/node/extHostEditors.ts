@@ -5,6 +5,8 @@
 'use strict';
 
 import URI from 'vs/base/common/uri';
+import {readonly, illegalArgument} from 'vs/base/common/errors';
+import {IdGenerator} from 'vs/base/common/idGenerator';
 import Event, {Emitter} from 'vs/base/common/event';
 import {IDisposable, dispose} from 'vs/base/common/lifecycle';
 import {TPromise} from 'vs/base/common/winjs.base';
@@ -19,7 +21,6 @@ import {IModelService} from 'vs/editor/common/services/modelService';
 import {MainThreadEditorsTracker, TextEditorRevealType, MainThreadTextEditor, ITextEditorConfigurationUpdate, IResolvedTextEditorConfiguration} from 'vs/workbench/api/node/mainThreadEditors';
 import * as TypeConverters from './extHostTypeConverters';
 import {TextDocument, TextEditorSelectionChangeEvent, TextEditorOptionsChangeEvent, TextEditorOptions, TextEditorViewColumnChangeEvent, ViewColumn} from 'vscode';
-import {EventType} from 'vs/workbench/common/events';
 import {ITelemetryService} from 'vs/platform/telemetry/common/telemetry';
 import {IEventService} from 'vs/platform/event/common/event';
 import {equals as arrayEquals} from 'vs/base/common/arrays';
@@ -171,13 +172,13 @@ export class ExtHostEditors {
 
 class TextEditorDecorationType implements vscode.TextEditorDecorationType {
 
-	private static LAST_ID: number = 0;
+	private static _Keys = new IdGenerator('TextEditorDecorationType');
 
 	private _proxy: MainThreadEditors;
 	public key: string;
 
 	constructor(proxy: MainThreadEditors, options: vscode.DecorationRenderOptions) {
-		this.key = 'TextEditorDecorationType' + (++TextEditorDecorationType.LAST_ID);
+		this.key = TextEditorDecorationType._Keys.nextId();
 		this._proxy = proxy;
 		this._proxy._registerTextEditorDecorationType(this.key, <any>options);
 	}
@@ -267,24 +268,13 @@ export class TextEditorEdit {
 
 	setEndOfLine(endOfLine:EndOfLine): void {
 		if (endOfLine !== EndOfLine.LF && endOfLine !== EndOfLine.CRLF) {
-			throw illegalArg('endOfLine');
+			throw illegalArgument('endOfLine');
 		}
 
 		this._setEndOfLine = endOfLine;
 	}
 }
 
-function readonly(name: string, alt?: string) {
-	let message = `The property '${name}' is readonly.`;
-	if (alt) {
-		message += ` Use '${alt}' instead.`;
-	}
-	return new Error(message);
-}
-
-function illegalArg(name: string) {
-	return new Error(`illgeal argument '${name}'`);
-}
 
 function deprecated(name: string, message: string = 'Refer to the documentation for further details.') {
 	return (target: Object, key: string, descriptor: TypedPropertyDescriptor<any>) => {
@@ -378,7 +368,7 @@ class ExtHostTextEditor implements vscode.TextEditor {
 
 	set selection(value: Selection) {
 		if (!(value instanceof Selection)) {
-			throw illegalArg('selection');
+			throw illegalArgument('selection');
 		}
 		this._selections = [value];
 		this._trySetSelection(true);
@@ -390,7 +380,7 @@ class ExtHostTextEditor implements vscode.TextEditor {
 
 	set selections(value: Selection[]) {
 		if (!Array.isArray(value) || value.some(a => !(a instanceof Selection))) {
-			throw illegalArg('selections');
+			throw illegalArgument('selections');
 		}
 		this._selections = value;
 		this._trySetSelection(true);
@@ -502,8 +492,8 @@ export class MainThreadEditors {
 
 		this._toDispose.push(this._editorTracker.onDidUpdateTextEditors(() => this._updateActiveAndVisibleTextEditors()));
 		this._toDispose.push(this._editorTracker.onChangedFocusedTextEditor((focusedTextEditorId) => this._updateActiveAndVisibleTextEditors()));
-		this._toDispose.push(eventService.addListener2(EventType.EDITOR_INPUT_CHANGED, () => this._updateActiveAndVisibleTextEditors()));
-		this._toDispose.push(eventService.addListener2(EventType.EDITOR_POSITION_CHANGED, () => this._updateActiveAndVisibleTextEditors()));
+		this._toDispose.push(workbenchEditorService.onEditorsChanged(() => this._updateActiveAndVisibleTextEditors()));
+		this._toDispose.push(workbenchEditorService.onEditorsMoved(() => this._updateActiveAndVisibleTextEditors()));
 	}
 
 	public dispose(): void {
@@ -525,7 +515,7 @@ export class MainThreadEditors {
 		}));
 		this._proxy._acceptTextEditorAdd({
 			id: id,
-			document: textEditor.getModel().getAssociatedResource(),
+			document: textEditor.getModel().uri,
 			options: textEditor.getConfiguration(),
 			selections: textEditor.getSelections(),
 			editorPosition: this._findEditorPosition(textEditor)
@@ -669,7 +659,7 @@ export class MainThreadEditors {
 		if (mainThreadEditor) {
 			let model = mainThreadEditor.getModel();
 			return this._workbenchEditorService.openEditor({
-				resource: model.getAssociatedResource(),
+				resource: model.uri,
 				options: { preserveFocus: false }
 			}, position).then(() => { return; });
 		}
@@ -684,7 +674,7 @@ export class MainThreadEditors {
 			let editors = this._workbenchEditorService.getVisibleEditors();
 			for (let editor of editors) {
 				if (mainThreadEditor.matches(editor)) {
-					return this._workbenchEditorService.closeEditor(editor).then(() => { return; });
+					return this._workbenchEditorService.closeEditor(editor.position, editor.input).then(() => { return; });
 				}
 			}
 		}

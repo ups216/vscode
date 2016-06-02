@@ -78,11 +78,12 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
 });
 
 let workspaceContext = {
-	toResource: (workspaceRelativePath: string) => {
-		if (typeof workspaceRelativePath === 'string' && workspaceRoot) {
-			return URI.file(path.join(workspaceRoot.fsPath, workspaceRelativePath)).toString();
+	resolveRelativePath: (relativePath: string, resource: string) => {
+		if (typeof relativePath === 'string' && resource) {
+			let resourceURI = URI.parse(resource);
+			return URI.file(path.normalize(path.join(path.dirname(resourceURI.fsPath), relativePath))).toString();
 		}
-		return workspaceRelativePath;
+		return void 0;
 	}
 };
 
@@ -122,7 +123,7 @@ let contributions = [
 	filesAssociationContribution
 ];
 
-let jsonSchemaService = new JSONSchemaService(request, workspaceContext, telemetry);
+let jsonSchemaService = new JSONSchemaService(request, workspaceContext, telemetry, connection.console);
 jsonSchemaService.setSchemaContributions(schemaContributions);
 
 let jsonCompletion = new JSONCompletion(jsonSchemaService, connection.console, contributions);
@@ -192,11 +193,9 @@ function updateConfiguration() {
 						url = 'vscode://schemas/custom/' + encodeURIComponent(schema.fileMatch.join('&'));
 					}
 				}
-				if (!Strings.startsWith(url, 'http://') && !Strings.startsWith(url, 'https://') && !Strings.startsWith(url, 'file://')) {
-					let resourceURL = workspaceContext.toResource(url);
-					if (resourceURL) {
-						url = resourceURL.toString();
-					}
+				if (Strings.startsWith(url, '.') && workspaceRoot) {
+					// workspace relative path
+					url = URI.file(path.normalize(path.join(workspaceRoot.fsPath, url))).toString();
 				}
 				if (url) {
 					jsonSchemaService.registerExternalSchema(url, schema.fileMatch, schema.schema);
@@ -210,6 +209,12 @@ function updateConfiguration() {
 
 
 function validateTextDocument(textDocument: ITextDocument): void {
+	if (textDocument.getText().length === 0) {
+		// ignore empty documents
+		connection.sendDiagnostics({ uri: textDocument.uri, diagnostics: [] });
+		return;
+	}
+
 	let jsonDocument = getJSONDocument(textDocument);
 	jsonSchemaService.getSchemaForResource(textDocument.uri, jsonDocument).then(schema => {
 		if (schema) {
@@ -251,7 +256,7 @@ function validateTextDocument(textDocument: ITextDocument): void {
 }
 
 connection.onDidChangeWatchedFiles((change) => {
-	// Monitored files have change in VSCode
+	// Monitored files have changed in VSCode
 	let hasChanges = false;
 	change.changes.forEach(c => {
 		if (jsonSchemaService.onResourceChange(c.uri)) {

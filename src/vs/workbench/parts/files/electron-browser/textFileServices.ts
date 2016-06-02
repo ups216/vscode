@@ -12,10 +12,11 @@ import strings = require('vs/base/common/strings');
 import {isWindows, isLinux} from 'vs/base/common/platform';
 import URI from 'vs/base/common/uri';
 import {UntitledEditorModel} from 'vs/workbench/common/editor/untitledEditorModel';
+import {ConfirmResult} from 'vs/workbench/common/editor';
 import {IEventService} from 'vs/platform/event/common/event';
 import {TextFileService as AbstractTextFileService} from 'vs/workbench/parts/files/browser/textFileServices';
 import {CACHE, TextFileEditorModel} from 'vs/workbench/parts/files/common/editors/textFileEditorModel';
-import {ITextFileOperationResult, ConfirmResult, AutoSaveMode} from 'vs/workbench/parts/files/common/files';
+import {ITextFileOperationResult, AutoSaveMode} from 'vs/workbench/parts/files/common/files';
 import {IUntitledEditorService} from 'vs/workbench/services/untitled/common/untitledEditorService';
 import {IFileService} from 'vs/platform/files/common/files';
 import {BinaryEditorModel} from 'vs/workbench/common/editor/binaryEditorModel';
@@ -35,21 +36,28 @@ export class TextFileService extends AbstractTextFileService {
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IFileService private fileService: IFileService,
 		@IUntitledEditorService private untitledEditorService: IUntitledEditorService,
-		@ILifecycleService lifecycleService: ILifecycleService,
+		@ILifecycleService private lifecycleService: ILifecycleService,
 		@ITelemetryService telemetryService: ITelemetryService,
 		@IConfigurationService configurationService: IConfigurationService,
 		@IEventService eventService: IEventService,
 		@IModeService private modeService: IModeService,
-		@IWorkbenchEditorService private editorService: IWorkbenchEditorService,
+		@IWorkbenchEditorService editorService: IWorkbenchEditorService,
 		@IWindowService private windowService: IWindowService
 	) {
-		super(contextService, instantiationService, configurationService, telemetryService, lifecycleService, eventService);
+		super(contextService, instantiationService, configurationService, telemetryService, editorService, eventService);
 
 		this.init();
 	}
 
+	protected registerListeners(): void {
+		super.registerListeners();
+
+		// Lifecycle
+		this.lifecycleService.onWillShutdown(event => event.veto(this.beforeShutdown()));
+		this.lifecycleService.onShutdown(this.onShutdown, this);
+	}
+
 	public beforeShutdown(): boolean | TPromise<boolean> {
-		super.beforeShutdown();
 
 		// Dirty files need treatment on shutdown
 		if (this.getDirty().length) {
@@ -95,6 +103,10 @@ export class TextFileService extends AbstractTextFileService {
 		else if (confirm === ConfirmResult.CANCEL) {
 			return true; // veto
 		}
+	}
+
+	private onShutdown(): void {
+		super.dispose();
 	}
 
 	public revertAll(resources?: URI[], force?: boolean): TPromise<ITextFileOperationResult> {
@@ -202,7 +214,7 @@ export class TextFileService extends AbstractTextFileService {
 
 	private mnemonicLabel(label: string): string {
 		if (!isWindows) {
-			return label.replace(/&&/g, ''); // no mnemonic support on mac/linux in buttons yet
+			return label.replace(/\(&&\w\)|&&/g, ''); // no mnemonic support on mac/linux
 		}
 
 		return label.replace(/&&/g, '&');
@@ -250,7 +262,7 @@ export class TextFileService extends AbstractTextFileService {
 
 				// Otherwise ask user
 				else {
-					targetPath = this.promptForPathSync(this.suggestFileName(untitledResources[i]));
+					targetPath = this.promptForPath(this.suggestFileName(untitledResources[i]));
 					if (!targetPath) {
 						return TPromise.as({
 							results: [...fileResources, ...untitledResources].map((r) => {
@@ -292,31 +304,29 @@ export class TextFileService extends AbstractTextFileService {
 	public saveAs(resource: URI, target?: URI): TPromise<URI> {
 
 		// Get to target resource
-		let targetPromise: TPromise<URI>;
-		if (target) {
-			targetPromise = TPromise.as(target);
-		} else {
+		if (!target) {
 			let dialogPath = resource.fsPath;
 			if (resource.scheme === 'untitled') {
 				dialogPath = this.suggestFileName(resource);
 			}
 
-			targetPromise = this.promptForPathAsync(dialogPath).then((path) => path ? URI.file(path) : null);
+			const pathRaw = this.promptForPath(dialogPath);
+			if (pathRaw) {
+				target = URI.file(pathRaw);
+			}
 		}
 
-		return targetPromise.then((target) => {
-			if (!target) {
-				return null; // user canceled
-			}
+		if (!target) {
+			return TPromise.as(null); // user canceled
+		}
 
-			// Just save if target is same as models own resource
-			if (resource.toString() === target.toString()) {
-				return this.save(resource).then(() => resource);
-			}
+		// Just save if target is same as models own resource
+		if (resource.toString() === target.toString()) {
+			return this.save(resource).then(() => resource);
+		}
 
-			// Do it
-			return this.doSaveAs(resource, target);
-		});
+		// Do it
+		return this.doSaveAs(resource, target);
 	}
 
 	private doSaveAs(resource: URI, target?: URI): TPromise<URI> {
@@ -343,9 +353,6 @@ export class TextFileService extends AbstractTextFileService {
 			return this.fileService.copyFile(resource, target);
 		}).then(() => {
 
-			// Add target to working files because this is an operation that indicates activity
-			this.getWorkingFilesModel().addEntry(target);
-
 			// Revert the source
 			return this.revert(resource).then(() => {
 
@@ -357,7 +364,7 @@ export class TextFileService extends AbstractTextFileService {
 
 	private doSaveTextFileAs(sourceModel: TextFileEditorModel | UntitledEditorModel, resource: URI, target: URI): TPromise<void> {
 		// create the target file empty if it does not exist already
-		return this.fileService.resolveFile(target).then(stat => stat, () => null).then(stat => stat ||  this.fileService.createFile(target)).then(stat => {
+		return this.fileService.resolveFile(target).then(stat => stat, () => null).then(stat => stat || this.fileService.createFile(target)).then(stat => {
 			// resolve a model for the file (which can be binary if the file is not a text file)
 			return this.editorService.resolveEditorModel({ resource: target }).then((targetModel: TextFileEditorModel) => {
 				// binary model: delete the file and run the operation again
@@ -384,15 +391,7 @@ export class TextFileService extends AbstractTextFileService {
 		return this.untitledEditorService.get(untitledResource).suggestFileName();
 	}
 
-	private promptForPathAsync(defaultPath?: string): TPromise<string> {
-		return new TPromise<string>((c, e) => {
-			this.windowService.getWindow().showSaveDialog(this.getSaveDialogOptions(defaultPath ? paths.normalize(defaultPath, true) : void 0), (path) => {
-				c(path);
-			});
-		});
-	}
-
-	private promptForPathSync(defaultPath?: string): string {
+	private promptForPath(defaultPath?: string): string {
 		return this.windowService.getWindow().showSaveDialog(this.getSaveDialogOptions(defaultPath ? paths.normalize(defaultPath, true) : void 0));
 	}
 
@@ -403,7 +402,7 @@ export class TextFileService extends AbstractTextFileService {
 
 		// Filters are working flaky in Electron and there are bugs. On Windows they are working
 		// somewhat but we see issues:
-		// - https://github.com/atom/electron/issues/3556
+		// - https://github.com/electron/electron/issues/3556
 		// - https://github.com/Microsoft/vscode/issues/451
 		// - Bug on Windows: When "All Files" is picked, the path gets an extra ".*"
 		// Until these issues are resolved, we disable the dialog file extension filtering.

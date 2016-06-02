@@ -24,19 +24,16 @@ define([
 	'vs/languages/languages.main',
 
 	// Workbench
+	'vs/workbench/browser/actions/toggleStatusbarVisibility',
 	'vs/workbench/browser/actions/toggleSidebarVisibility',
 	'vs/workbench/browser/actions/toggleSidebarPosition',
-	'vs/workbench/browser/actions/triggerQuickOpen',
-	'vs/workbench/browser/actions/triggerEditorActions',
-	'vs/workbench/browser/actions/triggerNavigation',
-	'vs/workbench/browser/actions/showPerformanceBox',
 	'vs/workbench/browser/actions/openSettings',
 	'vs/workbench/browser/actions/configureLocale',
 
 	'vs/workbench/parts/quickopen/browser/quickopen.contribution',
+	'vs/workbench/browser/parts/editor/editorPicker',
 
 	'vs/workbench/parts/files/browser/explorerViewlet',
-	'vs/workbench/parts/files/browser/workingFilesPicker',
 	'vs/workbench/parts/files/browser/fileActions.contribution',
 	'vs/workbench/parts/files/browser/files.contribution',
 	'vs/workbench/parts/files/electron-browser/files.electron.contribution',
@@ -49,7 +46,7 @@ define([
 
 	'vs/workbench/parts/debug/electron-browser/debug.contribution',
 
-	'vs/workbench/parts/errorList/browser/errorList.contribution',
+	'vs/workbench/parts/markers/markers.contribution',
 
 	'vs/workbench/parts/html/browser/html.contribution',
 
@@ -57,6 +54,8 @@ define([
 	'vs/workbench/parts/extensions/electron-browser/extensionsQuickOpen',
 
 	'vs/workbench/parts/output/browser/output.contribution',
+
+	'vs/workbench/parts/terminal/electron-browser/terminal.contribution',
 
 	'vs/workbench/parts/markdown/browser/markdown.contribution',
 	'vs/workbench/parts/markdown/browser/markdownActions.contribution',
@@ -74,13 +73,11 @@ define([
 
 	'vs/workbench/parts/contentprovider/common/contentprovider.contribution',
 
-	'vs/workbench/parts/telemetry/node/appInsights.telemetry.contribution',
-
 	'vs/workbench/parts/themes/electron-browser/themes.contribution',
 
 	'vs/workbench/parts/feedback/electron-browser/feedback.contribution',
 
-	'vs/workbench/parts/gettingStarted/electron-browser/electronGettingStarted.contribution',
+	'vs/workbench/parts/welcome/electron-browser/electronGettingStarted.contribution',
 
 	'vs/workbench/parts/update/electron-browser/update.contribution',
 

@@ -26,8 +26,7 @@ import {IMessageService} from 'vs/platform/message/common/message';
 import {IProgressService} from 'vs/platform/progress/common/progress';
 import {IRequestService} from 'vs/platform/request/common/request';
 import {ISearchService} from 'vs/platform/search/common/search';
-import {IStorageService} from 'vs/platform/storage/common/storage';
-import {TelemetryService} from 'vs/platform/telemetry/browser/telemetryService';
+import {IStorageService, NullStorageService} from 'vs/platform/storage/common/storage';
 import {ITelemetryService, NullTelemetryService} from 'vs/platform/telemetry/common/telemetry';
 import {MainThreadService} from 'vs/platform/thread/common/mainThreadService';
 import {IThreadService} from 'vs/platform/thread/common/thread';
@@ -49,27 +48,93 @@ export interface IEditorContextViewService extends IContextViewService {
 }
 
 export interface IEditorOverrideServices {
+	/**
+	 * @internal
+	 */
 	threadService?:IThreadService;
+	/**
+	 * @internal
+	 */
 	modeService?: IModeService;
+	/**
+	 * @internal
+	 */
 	extensionService?:IExtensionService;
+	/**
+	 * @internal
+	 */
 	instantiationService?:IInstantiationService;
+	/**
+	 * @internal
+	 */
 	messageService?:IMessageService;
+	/**
+	 * @internal
+	 */
 	markerService?:IMarkerService;
+	/**
+	 * @internal
+	 */
 	editorService?:IEditorService;
+	/**
+	 * @internal
+	 */
 	requestService?:IRequestService;
+	/**
+	 * @internal
+	 */
 	keybindingService?:IKeybindingService;
+	/**
+	 * @internal
+	 */
 	contextService?:IWorkspaceContextService;
+	/**
+	 * @internal
+	 */
 	contextViewService?:IEditorContextViewService;
+	/**
+	 * @internal
+	 */
 	contextMenuService?:IContextMenuService;
+	/**
+	 * @internal
+	 */
 	telemetryService?:ITelemetryService;
+	/**
+	 * @internal
+	 */
 	eventService?:IEventService;
+	/**
+	 * @internal
+	 */
 	storageService?:IStorageService;
+	/**
+	 * @internal
+	 */
 	searchService?:ISearchService;
+	/**
+	 * @internal
+	 */
 	configurationService?:IConfigurationService;
+	/**
+	 * @internal
+	 */
 	progressService?:IProgressService;
+	/**
+	 * @internal
+	 */
 	fileService?:IFileService;
+	/**
+	 * @internal
+	 */
 	modelService?: IModelService;
+	/**
+	 * @internal
+	 */
 	codeEditorService?: ICodeEditorService;
+	/**
+	 * @internal
+	 */
 	editorWorkerService?: IEditorWorkerService;
 }
 
@@ -87,6 +152,7 @@ export interface IStaticServices {
 	codeEditorService: ICodeEditorService;
 	editorWorkerService: IEditorWorkerService;
 	eventService: IEventService;
+	storageService: IStorageService;
 	instantiationService: IInstantiationService;
 }
 
@@ -163,11 +229,7 @@ export function getOrCreateStaticServices(services?: IEditorOverrideServices): I
 	let telemetryService = services.telemetryService;
 
 	if (!telemetryService) {
-		let config = contextService.getConfiguration();
-		let enableTelemetry = config && config.env ? !!config.env.enableTelemetry: false;
-		telemetryService = enableTelemetry
-			? new TelemetryService()
-			: NullTelemetryService;
+		telemetryService = NullTelemetryService;
 	}
 
 	let eventService = services.eventService || new EventService();
@@ -178,7 +240,7 @@ export function getOrCreateStaticServices(services?: IEditorOverrideServices): I
 		console.warn('standaloneEditorTelemetryEndpoint is obsolete');
 	}
 
-	let threadService = services.threadService || new MainThreadService(contextService, 'vs/editor/common/worker/editorWorkerServer', 2);
+	let threadService = services.threadService || new MainThreadService(contextService, 'vs/editor/common/worker/editorWorkerServer', 1);
 	let messageService = services.messageService || new SimpleMessageService();
 	let extensionService = services.extensionService || new SimpleExtensionService();
 	let markerService = services.markerService || new MainProcessMarkerService(threadService);
@@ -202,6 +264,7 @@ export function getOrCreateStaticServices(services?: IEditorOverrideServices): I
 		codeEditorService: codeEditorService,
 		editorWorkerService: editorWorkerService,
 		eventService: eventService,
+		storageService: services.storageService || NullStorageService,
 		instantiationService: void 0
 	};
 

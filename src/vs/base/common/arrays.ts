@@ -170,16 +170,36 @@ export function distinct<T>(array: T[], keyFn?: (t: T) => string): T[] {
 	});
 }
 
-export function first<T>(array: T[], fn: (item: T) => boolean, notFoundValue: T = null): T {
+export function uniqueFilter<T>(keyFn: (t: T) => string): (t: T) => boolean {
+	const seen: { [key: string]: boolean; } = Object.create(null);
+
+	return element => {
+		const key = keyFn(element);
+
+		if (seen[key]) {
+			return false;
+		}
+
+		seen[key] = true;
+		return true;
+	};
+}
+
+export function firstIndex<T>(array: T[], fn: (item: T) => boolean): number {
 	for (let i = 0; i < array.length; i++) {
 		const element = array[i];
 
 		if (fn(element)) {
-			return element;
+			return i;
 		}
 	}
 
-	return notFoundValue;
+	return -1;
+}
+
+export function first<T>(array: T[], fn: (item: T) => boolean, notFoundValue: T = null): T {
+	const index = firstIndex(array, fn);
+	return index < 0 ? notFoundValue : array[index];
 }
 
 export function commonPrefixLength<T>(one: T[], other: T[], equals: (a: T, b: T) => boolean = (a, b) => a === b): number {
@@ -194,4 +214,12 @@ export function commonPrefixLength<T>(one: T[], other: T[], equals: (a: T, b: T)
 
 export function flatten<T>(arr: T[][]): T[] {
 	return arr.reduce((r, v) => r.concat(v), []);
+}
+
+export function fill<T>(num: number, valueFn: () => T, arr: T[] = []): T[] {
+	for (let i = 0; i < num; i++) {
+		arr[i] = valueFn();
+	}
+
+	return arr;
 }

@@ -14,7 +14,6 @@ import lifecycle = require('vs/base/common/lifecycle');
 import winjs = require('vs/base/common/winjs.base');
 import ext = require('vs/workbench/common/contributions');
 import git = require('vs/workbench/parts/git/common/git');
-import workbenchEvents = require('vs/workbench/common/events');
 import common = require('vs/editor/common/editorCommon');
 import widget = require('vs/editor/browser/widget/codeEditorWidget');
 import viewlet = require('vs/workbench/browser/viewlet');
@@ -46,7 +45,7 @@ import IGitService = git.IGitService;
 
 export class StatusUpdater implements ext.IWorkbenchContribution
 {
-	static ID = 'Monaco.IDE.UI.Viewlets.GitViewlet.Workbench.StatusUpdater';
+	static ID = 'vs.git.statusUpdater';
 
 	private gitService: IGitService;
 	private eventService: IEventService;
@@ -108,7 +107,7 @@ export class StatusUpdater implements ext.IWorkbenchContribution
 class DirtyDiffModelDecorator {
 	static GIT_ORIGINAL_SCHEME = 'git-index';
 
-	static ID = 'Monaco.IDE.UI.Viewlets.GitViewlet.Editor.DirtyDiffDecorator';
+	static ID = 'vs.git.editor.dirtyDiffDecorator';
 	static MODIFIED_DECORATION_OPTIONS: common.IModelDecorationOptions = {
 		linesDecorationsClassName: 'git-dirty-modified-diff-glyph',
 		isWholeLine: true,
@@ -166,7 +165,7 @@ class DirtyDiffModelDecorator {
 		this.gitService = gitService;
 
 		this.model = model;
-		this._originalContentsURI = model.getAssociatedResource().withScheme(DirtyDiffModelDecorator.GIT_ORIGINAL_SCHEME);
+		this._originalContentsURI = model.uri.with({ scheme: DirtyDiffModelDecorator.GIT_ORIGINAL_SCHEME });
 		this.path = path;
 		this.decorations = [];
 
@@ -174,7 +173,7 @@ class DirtyDiffModelDecorator {
 		this.diffDelayer = new async.ThrottledDelayer<void>(200);
 
 		this.toDispose = [];
-		this.toDispose.push(model.addListener2(common.EventType.ModelContentChanged, () => this.triggerDiff()));
+		this.toDispose.push(model.onDidChangeContent(() => this.triggerDiff()));
 		this.toDispose.push(this.gitService.addListener2(git.ServiceEvents.STATE_CHANGED, () => this.onChanges()));
 		this.toDispose.push(this.gitService.addListener2(git.ServiceEvents.OPERATION_END, e => {
 			if (e.operation.id !== git.ServiceOperations.BACKGROUND_FETCH) {
@@ -254,7 +253,7 @@ class DirtyDiffModelDecorator {
 				return winjs.TPromise.as<any>([]); // disposed
 			}
 
-			return this.editorWorkerService.computeDirtyDiff(this._originalContentsURI, this.model.getAssociatedResource(), true);
+			return this.editorWorkerService.computeDirtyDiff(this._originalContentsURI, this.model.uri, true);
 		}).then((diff:common.IChange[]) => {
 			if (!this.model || this.model.isDisposed()) {
 				return; // disposed
@@ -351,7 +350,7 @@ export class DirtyDiffDecorator implements ext.IWorkbenchContribution {
 		this.models = [];
 		this.decorators = Object.create(null);
 		this.toDispose = [];
-		this.toDispose.push(eventService.addListener2(workbenchEvents.EventType.EDITOR_INPUT_CHANGED, () => this.onEditorInputChange()));
+		this.toDispose.push(editorService.onEditorsChanged(() => this.onEditorsChanged()));
 		this.toDispose.push(gitService.addListener2(git.ServiceEvents.DISPOSE, () => this.dispose()));
 	}
 
@@ -359,7 +358,7 @@ export class DirtyDiffDecorator implements ext.IWorkbenchContribution {
 		return 'git.DirtyDiffModelDecorator';
 	}
 
-	private onEditorInputChange(): void {
+	private onEditorsChanged(): void {
 		// HACK: This is the best current way of figuring out whether to draw these decorations
 		// or not. Needs context from the editor, to know whether it is a diff editor, in place editor
 		// etc.
@@ -368,7 +367,7 @@ export class DirtyDiffDecorator implements ext.IWorkbenchContribution {
 
 		// If there is no repository root, just wait until that changes
 		if (typeof repositoryRoot !== 'string') {
-			this.gitService.addOneTimeListener(git.ServiceEvents.STATE_CHANGED, () => this.onEditorInputChange());
+			this.gitService.addOneTimeDisposableListener(git.ServiceEvents.STATE_CHANGED, () => this.onEditorsChanged());
 
 			this.models.forEach(m => this.onModelInvisible(m));
 			this.models = [];
@@ -390,7 +389,7 @@ export class DirtyDiffDecorator implements ext.IWorkbenchContribution {
 			.filter((m, i, a) => !!m && a.indexOf(m, i + 1) === -1)
 
 			// get the associated resource
-			.map(m => ({ model: m, resource: m.getAssociatedResource() }))
+			.map(m => ({ model: m, resource: m.uri }))
 
 			// remove nulls
 			.filter(p => !!p.resource &&
@@ -477,7 +476,7 @@ export function registerContributions(): void {
 			linux: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_G },
 			mac: { primary: KeyMod.WinCtrl | KeyMod.Shift | KeyCode.KEY_G }
 		}),
-		'Show Git',
+		'View: Show Git',
 		nls.localize('view', "View")
 	);
 
@@ -498,7 +497,7 @@ export function registerContributions(): void {
 	(<quickopen.IQuickOpenRegistry>platform.Registry.as(quickopen.Extensions.Quickopen)).registerQuickOpenHandler(
 		new quickopen.QuickOpenHandlerDescriptor(
 			'vs/workbench/parts/git/browser/gitQuickOpen',
-			'CommandQuickOpenHandler',
+			'GitCommandQuickOpenHandler',
 			'git ',
 			nls.localize('gitCommands', "Git Commands")
 		)

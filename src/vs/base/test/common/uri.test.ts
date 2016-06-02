@@ -45,7 +45,7 @@ suite('URI', () => {
 	test('http#toString, encode=FALSE', () => {
 		assert.equal(URI.create('http', 'a-test-site.com', '/', 'test=true').toString(true), 'http://a-test-site.com/?test=true');
 		assert.equal(URI.create('http', 'a-test-site.com', '/', '', 'test=true').toString(true), 'http://a-test-site.com/#test=true');
-		assert.equal(URI.create().withScheme('http').withPath('/api/files/test.me').withQuery('t=1234').toString(true), 'http:/api/files/test.me?t=1234');
+		assert.equal(URI.create().with({ scheme: 'http', path: '/api/files/test.me', query: 't=1234' }).toString(true), 'http:/api/files/test.me?t=1234');
 
 		var value = URI.parse('file://shares/pröjects/c%23/#l12');
 		assert.equal(value.authority, 'shares');
@@ -63,12 +63,12 @@ suite('URI', () => {
 	});
 
 	test('with', () => {
-		assert.equal(URI.create().withScheme('http').withPath('/api/files/test.me').withQuery('t=1234').toString(), 'http:/api/files/test.me?t%3D1234');
-		assert.equal(URI.create().with('http', '', '/api/files/test.me', 't=1234', '').toString(), 'http:/api/files/test.me?t%3D1234');
-		assert.equal(URI.create().with('https', '', '/api/files/test.me', 't=1234', '').toString(), 'https:/api/files/test.me?t%3D1234');
-		assert.equal(URI.create().with('HTTP', '', '/api/files/test.me', 't=1234', '').toString(), 'HTTP:/api/files/test.me?t%3D1234');
-		assert.equal(URI.create().with('HTTPS', '', '/api/files/test.me', 't=1234', '').toString(), 'HTTPS:/api/files/test.me?t%3D1234');
-		assert.equal(URI.create().with('boo', '', '/api/files/test.me', 't=1234', '').toString(), 'boo:/api/files/test.me?t%3D1234');
+		assert.equal(URI.create().with({ scheme: 'http', path: '/api/files/test.me', query: 't=1234' }).toString(), 'http:/api/files/test.me?t%3D1234');
+		assert.equal(URI.create().with({ scheme: 'http', authority: '', path: '/api/files/test.me', query: 't=1234', fragment: '' }).toString(), 'http:/api/files/test.me?t%3D1234');
+		assert.equal(URI.create().with({ scheme: 'https', authority: '', path: '/api/files/test.me', query: 't=1234', fragment: '' }).toString(), 'https:/api/files/test.me?t%3D1234');
+		assert.equal(URI.create().with({ scheme: 'HTTP', authority: '', path: '/api/files/test.me', query: 't=1234', fragment: '' }).toString(), 'HTTP:/api/files/test.me?t%3D1234');
+		assert.equal(URI.create().with({ scheme: 'HTTPS', authority: '', path: '/api/files/test.me', query: 't=1234', fragment: '' }).toString(), 'HTTPS:/api/files/test.me?t%3D1234');
+		assert.equal(URI.create().with({ scheme: 'boo', authority: '', path: '/api/files/test.me', query: 't=1234', fragment: '' }).toString(), 'boo:/api/files/test.me?t%3D1234');
 	});
 
 	test('parse', () => {
@@ -176,21 +176,6 @@ suite('URI', () => {
 
 	test('parse, disallow //path when no authority', () => {
 		assert.throws(() => URI.parse('file:////shares/files/p.cs'));
-	});
-
-	// Useful reference:
-	test('correctFileUriToFilePath', () => {
-
-		var test = (input: string, expected: string) => {
-			expected = normalize(expected, true);
-			assert.equal(URI.parse(input).fsPath, expected, 'Result for ' + input);
-		};
-
-		test('file:///c:/alex.txt', 'c:\\alex.txt');
-		test('file:///c:/Source/Z%C3%BCrich%20or%20Zurich%20(%CB%88zj%CA%8A%C9%99r%C9%AAk,/Code/resources/app/plugins',
-			'c:\\Source\\Zürich or Zurich (ˈzjʊərɪk,\\Code\\resources\\app\\plugins');
-		test('file://monacotools/isi.txt', '\\\\monacotools\\isi.txt');
-		test('file://monacotools1/certificates/SSL/', '\\\\monacotools1\\certificates\\SSL\\');
 	});
 
 	test('URI#file', () => {
@@ -307,9 +292,8 @@ suite('URI', () => {
 		};
 
 		test('file:///c:/alex.txt', 'c:\\alex.txt');
-		test('file:///c:/Source/Z%C3%BCrich%20or%20Zurich%20(%CB%88zj%CA%8A%C9%99r%C9%AAk,/Code/resources/app/plugins',
-			'c:\\Source\\Zürich or Zurich (ˈzjʊərɪk,\\Code\\resources\\app\\plugins');
-		test('file://monacotools/isi.txt', '\\\\monacotools\\isi.txt');
+		test('file:///c:/Source/Z%C3%BCrich%20or%20Zurich%20(%CB%88zj%CA%8A%C9%99r%C9%AAk,/Code/resources/app/plugins', 'c:\\Source\\Zürich or Zurich (ˈzjʊərɪk,\\Code\\resources\\app\\plugins');
+		test('file://monacotools/folder/isi.txt', '\\\\monacotools\\folder\\isi.txt');
 		test('file://monacotools1/certificates/SSL/', '\\\\monacotools1\\certificates\\SSL\\');
 	});
 
@@ -351,19 +335,19 @@ suite('URI', () => {
 
 	test('URI - http, query & toString', function() {
 
-		let uri = URI.parse('http://go.microsoft.com/fwlink/?LinkId=518008');
+		let uri = URI.parse('https://go.microsoft.com/fwlink/?LinkId=518008');
 		assert.equal(uri.query, 'LinkId=518008');
-		assert.equal(uri.toString(true), 'http://go.microsoft.com/fwlink/?LinkId=518008');
-		assert.equal(uri.toString(), 'http://go.microsoft.com/fwlink/?LinkId%3D518008');
+		assert.equal(uri.toString(true), 'https://go.microsoft.com/fwlink/?LinkId=518008');
+		assert.equal(uri.toString(), 'https://go.microsoft.com/fwlink/?LinkId%3D518008');
 
 		let uri2 = URI.parse(uri.toString());
 		assert.equal(uri2.query, 'LinkId=518008');
 		assert.equal(uri2.query, uri.query);
 
-		uri = URI.parse('http://go.microsoft.com/fwlink/?LinkId=518008&foö&ké¥=üü');
+		uri = URI.parse('https://go.microsoft.com/fwlink/?LinkId=518008&foö&ké¥=üü');
 		assert.equal(uri.query, 'LinkId=518008&foö&ké¥=üü');
-		assert.equal(uri.toString(true), 'http://go.microsoft.com/fwlink/?LinkId=518008&foö&ké¥=üü');
-		assert.equal(uri.toString(), 'http://go.microsoft.com/fwlink/?LinkId%3D518008%26fo%C3%B6%26k%C3%A9%C2%A5%3D%C3%BC%C3%BC');
+		assert.equal(uri.toString(true), 'https://go.microsoft.com/fwlink/?LinkId=518008&foö&ké¥=üü');
+		assert.equal(uri.toString(), 'https://go.microsoft.com/fwlink/?LinkId%3D518008%26fo%C3%B6%26k%C3%A9%C2%A5%3D%C3%BC%C3%BC');
 
 		uri2 = URI.parse(uri.toString());
 		assert.equal(uri2.query, 'LinkId=518008&foö&ké¥=üü');

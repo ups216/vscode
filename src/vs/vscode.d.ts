@@ -73,7 +73,7 @@ declare namespace vscode {
 
 		/**
 		 * The offset of the first character which is not a whitespace character as defined
-		 * by `/\s/`.
+		 * by `/\s/`. **Note** that if a line is all whitespaces the length of the line is returned.
 		 *
 		 * @readonly
 		 */
@@ -547,6 +547,7 @@ declare namespace vscode {
 		 * The size in spaces a tab takes. This is used for two purposes:
 		 *  - the rendering width of a tab character;
 		 *  - the number of spaces to insert when [insertSpaces](#TextEditorOptions.insertSpaces) is true.
+		 *
 		 * When getting a text editor's options, this property will always be a number (resolved).
 		 * When setting a text editor's options, this property is optional and it can be a number or `"auto"`.
 		 */
@@ -1212,6 +1213,12 @@ declare namespace vscode {
 		 * A short title like 'Retry', 'Open Log' etc.
 		 */
 		title: string;
+
+		/**
+		 * Indicates that this item replaces the default
+		 * 'Close' action.
+		 */
+		isCloseAffordance?: boolean;
 	}
 
 	/**
@@ -2294,6 +2301,26 @@ declare namespace vscode {
 		onEnterRules?: OnEnterRule[];
 
 		/**
+		 * The language's auto closing pairs. The 'close' character is automatically inserted with the
+		 * 'open' character is typed. If not set, the configured brackets will be used.
+		 */
+		autoClosingPairs?: {
+			open: string;
+			close: string;
+			notIn?: string[];
+		}[];
+
+		/**
+		 * The language's surrounding pairs. When the 'open' character is typed on a selection, the
+		 * selected string is surrounded by the open and close characters. If not set, the autoclosing pairs
+		 * settings will be used.
+		 */
+		surroundingPairs?: {
+			open: string;
+			close: string;
+		}[];
+
+		/**
 		 * **Deprecated** Do not use.
 		 *
 		 * @deprecated Will be replaced by a better API soon.
@@ -2316,7 +2343,7 @@ declare namespace vscode {
 		/**
 		 * **Deprecated** Do not use.
 		 *
-		 * @deprecated Will be replaced by a better API soon.
+		 * @deprecated Use autoClosingPairs and surroundingPairs instead.
 		 */
 		__characterPairSupport?: {
 			autoClosingPairs: {
@@ -2481,19 +2508,24 @@ declare namespace vscode {
 		set(uri: Uri, diagnostics: Diagnostic[]): void;
 
 		/**
+		 * Replace all entries in this collection.
+		 *
+		 * Diagnostics of multiple tuples of the same uri will be merged, e.g
+		 * `[[file1, [d1]], [file1, [d2]]]` is equivalent to `[[file1, [d1, d2]]]`.
+		 * If a diagnostics item is `undefined` as in `[file1, undefined]`
+		 * all previous but not subsequent diagnostics are removed.
+		 *
+		 * @param entries An array of tuples, like `[[file1, [d1, d2]], [file2, [d3, d4, d5]]]`, or `undefined`.
+		 */
+		set(entries: [Uri, Diagnostic[]][]): void;
+
+		/**
 		 * Remove all diagnostics from this collection that belong
 		 * to the provided `uri`. The same as `#set(uri, undefined)`.
 		 *
 		 * @param uri A resource identifier.
 		 */
 		delete(uri: Uri): void;
-
-		/**
-		 * Replace all entries in this collection.
-		 *
-		 * @param entries An array of tuples, like `[[file1, [d1, d2]], [file2, [d3, d4, d5]]]`, or `undefined`.
-		 */
-		set(entries: [Uri, Diagnostic[]][]): void;
 
 		/**
 		 * Remove all diagnostics from this collection. The same
@@ -2808,6 +2840,13 @@ declare namespace vscode {
 	 * Namespace describing the environment the editor runs in.
 	 */
 	export namespace env {
+
+		/**
+		 * The application name of the editor, like 'VS Code'.
+		 *
+		 * @readonly
+		 */
+		export let appName: string;
 
 		/**
 		 * Represents the preferred user-language, like `de-CH`, `fr`, or `en-US`.

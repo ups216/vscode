@@ -23,7 +23,7 @@ var EntryPoint = (function() {
 		excludes = toArray(excludes);
 		this.result.push({
 			name: moduleId,
-			exclude: ['vs/css', 'vs/nls', 'vs/text'].concat(this.modules).concat(excludes)
+			exclude: ['vs/css', 'vs/nls'].concat(this.modules).concat(excludes)
 		});
 		return new EntryPoint(this.result, this.modules.concat([moduleId].concat(excludes)));
 	};
@@ -44,21 +44,26 @@ exports.collectModules = function(args) {
 		.combine(worker)
 			.define('vs/languages/json/common/jsonWorker');
 
-	// ---- typescript & javascript -----------------
+	// // ---- typescript & javascript -----------------
+
+	// result.push({
+	// 	name: 'vs/languages/typescript/common/lib/typescriptServices',
+	// 	exclude: ['vs/css', 'vs/nls']
+	// });
+
+	// result.push({
+	// 	name: 'vs/languages/typescript/common/worker',
+	// 	exclude: ['vs/base/common/worker/simpleWorker', 'vs/languages/typescript/common/lib/typescriptServices', 'vs/css', 'vs/nls']
+	// });
+
+	// result.push({
+	// 	name: 'vs/languages/typescript/common/mode',
+	// 	exclude: ['vs/editor/editor.main', 'vs/languages/typescript/common/lib/typescriptServices', 'vs/css', 'vs/nls']
+	// });
 
 	result.push({
-		name: 'vs/languages/typescript/common/lib/typescriptServices',
-		exclude: ['vs/css', 'vs/nls', 'vs/text']
-	});
-
-	result.push({
-		name: 'vs/languages/typescript/common/worker',
-		exclude: ['vs/base/common/worker/simpleWorker', 'vs/languages/typescript/common/lib/typescriptServices', 'vs/css', 'vs/nls', 'vs/text']
-	});
-
-	result.push({
-		name: 'vs/languages/typescript/common/mode',
-		exclude: ['vs/editor/editor.main', 'vs/languages/typescript/common/lib/typescriptServices', 'vs/css', 'vs/nls', 'vs/text']
+		name: 'vs/editor/browser/standalone/standaloneWorker',
+		exclude: [ 'vs/base/common/worker/simpleWorker', 'vs/css', 'vs/nls' ]
 	});
 
 	return result;

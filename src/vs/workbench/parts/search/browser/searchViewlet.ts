@@ -8,6 +8,7 @@
 import 'vs/css!./media/searchviewlet';
 import {TPromise, PPromise} from 'vs/base/common/winjs.base';
 import nls = require('vs/nls');
+import platform = require('vs/base/common/platform');
 import {EditorType} from 'vs/editor/common/editorCommon';
 import lifecycle = require('vs/base/common/lifecycle');
 import errors = require('vs/base/common/errors');
@@ -35,6 +36,7 @@ import {Scope} from 'vs/workbench/common/memento';
 import {OpenGlobalSettingsAction} from 'vs/workbench/browser/actions/openSettings';
 import {UntitledEditorEvent, EventType as WorkbenchEventType} from 'vs/workbench/common/events';
 import {ITextFileService} from 'vs/workbench/parts/files/common/files';
+import {getOutOfWorkspaceEditorResources} from 'vs/workbench/common/editor';
 import {FileChangeType, FileChangesEvent, EventType as FileEventType} from 'vs/platform/files/common/files';
 import {Viewlet} from 'vs/workbench/browser/viewlet';
 import {Match, EmptyMatch, SearchResult, FileMatch} from 'vs/workbench/parts/search/common/searchModel';
@@ -48,7 +50,7 @@ import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/edito
 import {IViewletService} from 'vs/workbench/services/viewlet/common/viewletService';
 import {Range} from 'vs/editor/common/core/range';
 import {IStorageService} from 'vs/platform/storage/common/storage';
-import {IConfigurationService, IConfigurationServiceEvent, ConfigurationServiceEventTypes} from 'vs/platform/configuration/common/configuration';
+import {IConfigurationService} from 'vs/platform/configuration/common/configuration';
 import {IContextViewService} from 'vs/platform/contextview/browser/contextView';
 import {IEventService} from 'vs/platform/event/common/event';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
@@ -159,11 +161,16 @@ class SearchController extends DefaultController {
 	constructor(private viewlet: SearchViewlet) {
 		super({ clickBehavior: ClickBehavior.ON_MOUSE_DOWN });
 
-		this.downKeyBindingDispatcher.set(CommonKeybindings.DELETE, (tree: ITree, event: any) => { this.onDelete(tree, event); });
+		if (platform.isMacintosh) {
+			this.downKeyBindingDispatcher.set(CommonKeybindings.CTRLCMD_BACKSPACE, (tree: ITree, event: any) => { this.onDelete(tree, event); });
+		} else {
+			this.downKeyBindingDispatcher.set(CommonKeybindings.DELETE, (tree: ITree, event: any) => { this.onDelete(tree, event); });
+		}
+
 		this.downKeyBindingDispatcher.set(CommonKeybindings.ESCAPE, (tree: ITree, event: any) => { this.onEscape(tree, event); });
 	}
 
-	protected onEscape(tree: ITree, event:IKeyboardEvent):boolean {
+	protected onEscape(tree: ITree, event: IKeyboardEvent): boolean {
 		if (this.viewlet.cancelSearch()) {
 			return true;
 		}
@@ -173,13 +180,10 @@ class SearchController extends DefaultController {
 
 	private onDelete(tree: ITree, event: IKeyboardEvent): boolean {
 		let result = false;
-		let elements = tree.getSelection();
-		for (let i = 0; i < elements.length; i++) {
-			let element = elements[i];
-			if (element instanceof FileMatch) {
-				new RemoveAction(tree, element).run().done(null, errors.onUnexpectedError);
-				result = true;
-			}
+		let element = tree.getFocus();
+		if (element instanceof FileMatch) {
+			new RemoveAction(tree, element).run().done(null, errors.onUnexpectedError);
+			result = true;
 		}
 
 		return result;
@@ -292,7 +296,10 @@ class SearchRenderer extends ActionsRenderer {
 			elements.push(strings.escape(preview.after));
 			elements.push('</span>');
 
-			$('a.plain').innerHtml(elements.join(strings.empty)).appendTo(domElement);
+			$('a.plain')
+				.innerHtml(elements.join(strings.empty))
+				.title((preview.before + preview.inside + preview.after).trim().substr(0, 999))
+				.appendTo(domElement);
 		}
 
 		return null;
@@ -641,7 +648,7 @@ export class SearchViewlet extends Viewlet {
 	private loading: boolean;
 	private queryBuilder: QueryBuilder;
 	private viewModel: SearchResult;
-	private callOnModelChange: Function[];
+	private callOnModelChange: lifecycle.IDisposable[];
 
 	private viewletVisible: IKeybindingContextKey<boolean>;
 	private actionRegistry: { [key: string]: Action; };
@@ -682,9 +689,9 @@ export class SearchViewlet extends Viewlet {
 		this.queryBuilder = this.instantiationService.createInstance(QueryBuilder);
 		this.viewletSettings = this.getMemento(storageService, Scope.WORKSPACE);
 
-		this.toUnbind.push(this.eventService.addListener(FileEventType.FILE_CHANGES, (e) => this.onFilesChanged(e)));
-		this.toUnbind.push(this.eventService.addListener(WorkbenchEventType.UNTITLED_FILE_DELETED, (e) => this.onUntitledFileDeleted(e)));
-		this.toUnbind.push(this.configurationService.addListener(ConfigurationServiceEventTypes.UPDATED, (e: IConfigurationServiceEvent) => this.onConfigurationUpdated(e.config)));
+		this.toUnbind.push(this.eventService.addListener2(FileEventType.FILE_CHANGES, (e) => this.onFilesChanged(e)));
+		this.toUnbind.push(this.eventService.addListener2(WorkbenchEventType.UNTITLED_FILE_DELETED, (e) => this.onUntitledFileDeleted(e)));
+		this.toUnbind.push(this.configurationService.onDidUpdateConfiguration(e => this.onConfigurationUpdated(e.config)));
 	}
 
 	private onConfigurationUpdated(configuration: any): void {
@@ -878,9 +885,9 @@ export class SearchViewlet extends Viewlet {
 					ariaLabel: nls.localize('treeAriaLabel', "Search Results")
 				});
 
-			this.toUnbind.push(() => renderer.dispose());
+			this.toUnbind.push(renderer);
 
-			this.toUnbind.push(this.tree.addListener('selection', (event: any) => {
+			this.toUnbind.push(this.tree.addListener2('selection', (event: any) => {
 				let element: any, keyboard = event.payload && event.payload.origin === 'keyboard';
 				if (keyboard) {
 					element = this.tree.getFocus();
@@ -1156,7 +1163,7 @@ export class SearchViewlet extends Viewlet {
 
 		let options: IQueryOptions = {
 			folderResources: this.contextService.getWorkspace() ? [this.contextService.getWorkspace().resource] : [],
-			extraFileResources: this.textFileService.getWorkingFilesModel().getOutOfWorkspaceContextEntries().map(e => e.resource),
+			extraFileResources: getOutOfWorkspaceEditorResources(this.editorService, this.contextService),
 			excludePattern: excludes,
 			includePattern: includes,
 			maxResults: SearchViewlet.MAX_TEXT_RESULTS,
@@ -1361,7 +1368,7 @@ export class SearchViewlet extends Viewlet {
 					this.viewModel = this.instantiationService.createInstance(SearchResult, query.contentPattern);
 					this.tree.setInput(this.viewModel).then(() => {
 						autoExpand(false);
-						this.callOnModelChange.push(this.viewModel.addListener('changed', (e: any) => this.tree.refresh(e, true)));
+						this.callOnModelChange.push(this.viewModel.addListener2('changed', (e: any) => this.tree.refresh(e, true)));
 					}).done(null, errors.onUnexpectedError);
 				}
 
@@ -1497,6 +1504,6 @@ export class SearchViewlet extends Viewlet {
 			this.viewModel.dispose();
 			this.viewModel = null;
 		}
-		lifecycle.cAll(this.callOnModelChange);
+		this.callOnModelChange = lifecycle.dispose(this.callOnModelChange);
 	}
 }

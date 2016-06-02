@@ -158,7 +158,8 @@ export class ExtHostAPIImplementation {
 		this.env = Object.freeze({
 			get machineId() { return telemetryInfo.machineId; },
 			get sessionId() { return telemetryInfo.sessionId; },
-			get language() { return Platform.language; }
+			get language() { return Platform.language; },
+			get appName() { return contextService.getConfiguration().env.appName; }
 		});
 		telemetryService.getTelemetryInfo().then(info => telemetryInfo = info, errors.onUnexpectedError);
 
@@ -231,7 +232,9 @@ export class ExtHostAPIImplementation {
 			showQuickPick: (items: any, options: vscode.QuickPickOptions) => {
 				return extHostQuickOpen.show(items, options);
 			},
-			showInputBox: extHostQuickOpen.input.bind(extHostQuickOpen),
+			showInputBox(options?: vscode.InputBoxOptions) {
+				return extHostQuickOpen.input(options);
+			},
 
 			createStatusBarItem(position?: vscode.StatusBarAlignment, priority?: number): vscode.StatusBarItem {
 				return extHostStatusBar.createStatusBarEntry(<number>position, priority);
@@ -416,6 +419,12 @@ export class ExtHostAPIImplementation {
 			setWordDefinitionFor(modeId, wordPattern);
 		} else {
 			setWordDefinitionFor(modeId, null);
+		}
+
+		// backward compatibility, migrate deprecated setting
+		if (configuration.__characterPairSupport && !configuration.autoClosingPairs) {
+			configuration.autoClosingPairs = configuration.__characterPairSupport.autoClosingPairs;
+			delete configuration.__characterPairSupport;
 		}
 
 		return this.Modes_RichEditSupport_register(modeId, configuration);

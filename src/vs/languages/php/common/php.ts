@@ -14,6 +14,7 @@ import {RichEditSupport} from 'vs/editor/common/modes/supports/richEditSupport';
 import {TokenizationSupport, ILeavingNestedModeData, ITokenizationCustomization} from 'vs/editor/common/modes/supports/tokenizationSupport';
 import {TextualSuggestSupport} from 'vs/editor/common/modes/supports/suggestSupport';
 import {IEditorWorkerService} from 'vs/editor/common/services/editorWorkerService';
+import {IConfigurationService} from 'vs/platform/configuration/common/configuration';
 
 
 var brackets = (function() {
@@ -453,13 +454,13 @@ export class PHPMode extends AbstractMode implements ITokenizationCustomization 
 
 	public tokenizationSupport: Modes.ITokenizationSupport;
 	public richEditSupport: Modes.IRichEditSupport;
-	public suggestSupport:Modes.ISuggestSupport;
 
 	private modeService:IModeService;
 
 	constructor(
 		descriptor:Modes.IModeDescriptor,
 		@IModeService modeService: IModeService,
+		@IConfigurationService configurationService: IConfigurationService,
 		@IEditorWorkerService editorWorkerService: IEditorWorkerService
 	) {
 		super(descriptor.id);
@@ -481,19 +482,17 @@ export class PHPMode extends AbstractMode implements ITokenizationCustomization 
 				['(', ')']
 			],
 
-			__characterPairSupport: {
-				autoClosingPairs: [
-					{ open: '{', close: '}', notIn: ['string.php'] },
-					{ open: '[', close: ']', notIn: ['string.php'] },
-					{ open: '(', close: ')', notIn: ['string.php'] },
-					{ open: '"', close: '"', notIn: ['string.php'] },
-					{ open: '\'', close: '\'', notIn: ['string.php'] }
-				]
-			}
+			autoClosingPairs: [
+				{ open: '{', close: '}', notIn: ['string.php'] },
+				{ open: '[', close: ']', notIn: ['string.php'] },
+				{ open: '(', close: ')', notIn: ['string.php'] },
+				{ open: '"', close: '"', notIn: ['string.php'] },
+				{ open: '\'', close: '\'', notIn: ['string.php'] }
+			]
 		});
 
 		if (editorWorkerService) {
-			this.suggestSupport = new TextualSuggestSupport(this.getId(), editorWorkerService);
+			Modes.SuggestRegistry.register(this.getId(), new TextualSuggestSupport(editorWorkerService, configurationService), true);
 		}
 	}
 

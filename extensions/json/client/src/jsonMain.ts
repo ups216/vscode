@@ -59,7 +59,7 @@ export function activate(context: ExtensionContext) {
 			synchronize: {
 				// Synchronize the setting section 'json' to the server
 				configurationSection: ['json.schemas', 'http.proxy', 'http.proxyStrictSSL'],
-				fileEvents: workspace.createFileSystemWatcher('**/.json')
+				fileEvents: workspace.createFileSystemWatcher('**/*.json')
 			},
 			initializationOptions: {
 				languageIds
@@ -94,16 +94,14 @@ export function activate(context: ExtensionContext) {
 
 		languages.setLanguageConfiguration('json', {
 			wordPattern: /(-?\d*\.\d\w*)|([^\[\{\]\}\:\"\,\s]+)/g,
-			__characterPairSupport: {
-				autoClosingPairs: [
-					{ open: '{', close: '}' },
-					{ open: '[', close: ']' },
-					{ open: '(', close: ')' },
-					{ open: '"', close: '"', notIn: ['string'] },
-					{ open: '\'', close: '\'', notIn: ['string', 'comment'] },
-					{ open: '`', close: '`', notIn: ['string', 'comment'] }
-				]
-			}
+			autoClosingPairs: [
+				{ open: '{', close: '}' },
+				{ open: '[', close: ']' },
+				{ open: '(', close: ')' },
+				{ open: '"', close: '"', notIn: ['string'] },
+				{ open: '\'', close: '\'', notIn: ['string', 'comment'] },
+				{ open: '`', close: '`', notIn: ['string', 'comment'] }
+			]
 		});
 	});
 }

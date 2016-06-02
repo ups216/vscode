@@ -213,7 +213,7 @@ export default class TypeScriptServiceClient implements ITypescriptServiceClient
 				electron.fork(modulePath, [], options, (err: any, childProcess: cp.ChildProcess) => {
 					if (err) {
 						this.lastError = err;
-						window.showErrorMessage(localize('serverCouldNotBeStarted', 'TypeScript language server couldn\'t be started. Error message is: {0}'), err.message);
+						window.showErrorMessage(localize('serverCouldNotBeStarted', 'TypeScript language server couldn\'t be started. Error message is: {0}', err.message || err));
 						this.logTelemetry('error', {message: err.message});
 						return;
 					}
@@ -383,7 +383,7 @@ export default class TypeScriptServiceClient implements ITypescriptServiceClient
 			}
 		}
 		if (this.trace !== Trace.Off) {
-			this.output.append(`TypeScript Service: tried to cancel request with sequence number ${seq}. But request got already delivered.`);
+			this.output.append(`TypeScript Service: tried to cancel request with sequence number ${seq}. But request got already delivered.\n`);
 		}
 		return false;
 	}

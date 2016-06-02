@@ -7,9 +7,10 @@
 import {IDisposable} from 'vs/base/common/lifecycle';
 import {Range} from 'vs/editor/common/core/range';
 import * as editorCommon from 'vs/editor/common/editorCommon';
+import {IDecorationsViewportData} from 'vs/editor/common/viewModel/viewModel';
 
 export interface IModelRangeToViewRangeConverter {
-	convertModelRangeToViewRange(modelRange:editorCommon.IRange, isWholeLine:boolean): editorCommon.IEditorRange;
+	convertModelRangeToViewRange(modelRange:editorCommon.IRange, isWholeLine:boolean): Range;
 }
 
 interface IViewModelDecoration extends editorCommon.IModelDecoration {
@@ -26,11 +27,11 @@ interface IViewModelDecorationSource {
 class ViewModelDecoration implements IViewModelDecoration {
 	id: string;
 	ownerId: number;
-	range: editorCommon.IEditorRange;
+	range: Range;
 	options: editorCommon.IModelDecorationOptions;
 	modelRange: editorCommon.IRange;
 
-	constructor(source:IViewModelDecorationSource, range:editorCommon.IEditorRange) {
+	constructor(source:IViewModelDecorationSource, range:Range) {
 		this.id = source.id;
 		this.options = source.options;
 		this.ownerId = source.ownerId;
@@ -46,7 +47,7 @@ export class ViewModelDecorations implements IDisposable {
 	private converter:IModelRangeToViewRangeConverter;
 	private decorations:IViewModelDecoration[];
 
-	private _cachedModelDecorationsResolver:editorCommon.IDecorationsViewportData;
+	private _cachedModelDecorationsResolver:IDecorationsViewportData;
 	private _cachedModelDecorationsResolverStartLineNumber:number;
 	private _cachedModelDecorationsResolverEndLineNumber:number;
 
@@ -186,7 +187,7 @@ export class ViewModelDecorations implements IDisposable {
 		var decorations = this.decorations,
 			d:IViewModelDecoration,
 			i:number,
-			newRange:editorCommon.IEditorRange,
+			newRange:Range,
 			somethingChanged:boolean = false,
 			inlineDecorationsChanged = false,
 			len:number;
@@ -217,7 +218,7 @@ export class ViewModelDecorations implements IDisposable {
 		return this.decorations;
 	}
 
-	public getDecorationsViewportData(startLineNumber: number, endLineNumber: number): editorCommon.IDecorationsViewportData {
+	public getDecorationsViewportData(startLineNumber: number, endLineNumber: number): IDecorationsViewportData {
 		var cacheIsValid = true;
 		cacheIsValid = cacheIsValid && (this._cachedModelDecorationsResolver !== null);
 		cacheIsValid = cacheIsValid && (this._cachedModelDecorationsResolverStartLineNumber === startLineNumber);
@@ -230,7 +231,7 @@ export class ViewModelDecorations implements IDisposable {
 		return this._cachedModelDecorationsResolver;
 	}
 
-	private _getDecorationsViewportData(startLineNumber: number, endLineNumber: number): editorCommon.IDecorationsViewportData {
+	private _getDecorationsViewportData(startLineNumber: number, endLineNumber: number): IDecorationsViewportData {
 		var decorationsInViewport: editorCommon.IModelDecoration[] = [],
 			inlineDecorations: editorCommon.IModelDecoration[][] = [],
 			j: number,

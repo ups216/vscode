@@ -40,7 +40,7 @@ import {IKeybindingService, IKeybindingContextKey} from 'vs/platform/keybinding/
 import {IThemeService} from 'vs/workbench/services/themes/common/themeService';
 
 /**
- * The text editor that leverages the monaco diff text editor for the editing experience.
+ * The text editor that leverages the diff text editor for the editing experience.
  */
 export class TextDiffEditor extends BaseTextEditor {
 
@@ -79,10 +79,13 @@ export class TextDiffEditor extends BaseTextEditor {
 	}
 
 	public createEditorControl(parent: Builder): IDiffEditor {
+
+		// Actions
 		this.nextDiffAction = new NavigateAction(this, true);
 		this.previousDiffAction = new NavigateAction(this, false);
 
-		let delegatingService = this.instantiationService.createInstance(DelegatingWorkbenchEditorService, this, (editor: BaseEditor, input: EditorInput, options?: EditorOptions, arg4?: any) => {
+		// Support navigation within the diff editor by overriding the editor service within
+		let delegatingEditorService = this.instantiationService.createInstance(DelegatingWorkbenchEditorService, this, (editor: BaseEditor, input: EditorInput, options?: EditorOptions, arg4?: any) => {
 
 			// Check if arg4 is a position argument that differs from this editors position
 			if (types.isUndefinedOrNull(arg4) || arg4 === false || arg4 === this.position) {
@@ -90,14 +93,12 @@ export class TextDiffEditor extends BaseTextEditor {
 				if (input && options && activeDiffInput) {
 
 					// Input matches modified side of the diff editor: perform the action on modified side
-					if (input.matches(activeDiffInput.getModifiedInput())) {
-						return this.setInput(this.getInput(), options).then(() => {
-							return true;
-						});
+					if (input.matches(activeDiffInput.modifiedInput)) {
+						return this.setInput(this.getInput(), options).then(() => true);
 					}
 
 					// Input matches original side of the diff editor: perform the action on original side
-					else if (input.matches(activeDiffInput.getOriginalInput())) {
+					else if (input.matches(activeDiffInput.originalInput)) {
 						let originalEditor = this.getControl().getOriginalEditor();
 						if (options instanceof TextEditorOptions) {
 							(<TextEditorOptions>options).apply(originalEditor);
@@ -112,7 +113,7 @@ export class TextDiffEditor extends BaseTextEditor {
 		});
 
 		// Create a special child of instantiator that will delegate all calls to openEditor() to the same diff editor if the input matches with the modified one
-		let diffEditorInstantiator = this.instantiationService.createChild(new ServiceCollection([IWorkbenchEditorService, delegatingService]));
+		let diffEditorInstantiator = this.instantiationService.createChild(new ServiceCollection([IWorkbenchEditorService, delegatingEditorService]));
 
 		return diffEditorInstantiator.createInstance(DiffEditorWidget, parent.getHTMLElement(), this.getCodeEditorOptions());
 	}
@@ -169,7 +170,7 @@ export class TextDiffEditor extends BaseTextEditor {
 			this.diffNavigator = new DiffNavigator(diffEditor, {
 				alwaysRevealFirst: autoRevealFirstChange
 			});
-			this.diffNavigator.addListener(DiffNavigator.Events.UPDATED, () => {
+			this.diffNavigator.addListener2(DiffNavigator.Events.UPDATED, () => {
 				this.nextDiffAction.updateEnablement();
 				this.previousDiffAction.updateEnablement();
 			});
@@ -212,8 +213,8 @@ export class TextDiffEditor extends BaseTextEditor {
 		let options: IDiffEditorOptions = super.getCodeEditorOptions();
 
 		let input = this.input;
-		if (input && types.isFunction((<DiffEditorInput>input).getModifiedInput)) {
-			let modifiedInput = (<DiffEditorInput>input).getModifiedInput();
+		if (input instanceof DiffEditorInput) {
+			let modifiedInput = input.modifiedInput;
 			let readOnly = modifiedInput instanceof StringEditorInput || modifiedInput instanceof ResourceEditorInput;
 
 			options.readOnly = readOnly;
@@ -257,10 +258,10 @@ export class TextDiffEditor extends BaseTextEditor {
 		super.clearInput();
 	}
 
-	public setVisible(visible: boolean, position: Position): TPromise<void> {
+	public setEditorVisible(visible: boolean, position: Position): void {
 		this.textDiffEditorVisible.set(visible);
 
-		return super.setVisible(visible, position);
+		super.setEditorVisible(visible, position);
 	}
 
 	public getDiffNavigator(): DiffNavigator {

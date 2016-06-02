@@ -4,98 +4,96 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {ThrottledDelayer} from 'vs/base/common/async';
+import {RunOnceScheduler} from 'vs/base/common/async';
 import {onUnexpectedError} from 'vs/base/common/errors';
-import {EventEmitter, IEventEmitter, ListenerCallback} from 'vs/base/common/eventEmitter';
-import {IDisposable, dispose} from 'vs/base/common/lifecycle';
-import {TPromise} from 'vs/base/common/winjs.base';
-import {EventType, ICommonCodeEditor, ICursorSelectionChangedEvent, IModeSupportChangedEvent} from 'vs/editor/common/editorCommon';
-import {ParameterHintsRegistry, IParameterHints} from 'vs/editor/common/modes';
-import {getParameterHints} from '../common/parameterHints';
+import Event, {Emitter} from 'vs/base/common/event';
+import {IDisposable, dispose, Disposable} from 'vs/base/common/lifecycle';
+import {ICommonCodeEditor, ICursorSelectionChangedEvent} from 'vs/editor/common/editorCommon';
+import {SignatureHelpProviderRegistry, SignatureHelp} from 'vs/editor/common/modes';
+import {provideSignatureHelp} from '../common/parameterHints';
 
 export interface IHintEvent {
-	hints: IParameterHints;
+	hints: SignatureHelp;
 }
 
-export class ParameterHintsModel extends EventEmitter {
+export class ParameterHintsModel extends Disposable {
 
 	static DELAY = 120; // ms
 
+	private _onHint = this._register(new Emitter<IHintEvent>());
+	public onHint: Event<IHintEvent> = this._onHint.event;
+
+	private _onCancel = this._register(new Emitter<void>());
+	public onCancel: Event<void> = this._onCancel.event;
+
 	private editor: ICommonCodeEditor;
-	private toDispose: IDisposable[];
 	private triggerCharactersListeners: IDisposable[];
 
 	private active: boolean;
-	private prevResult: IParameterHints;
-	private throttledDelayer: ThrottledDelayer<boolean>;
+	private throttledDelayer: RunOnceScheduler;
 
 	constructor(editor:ICommonCodeEditor) {
-		super(['cancel', 'hint', 'destroy']);
+		super();
 
 		this.editor = editor;
-		this.toDispose = [];
 		this.triggerCharactersListeners = [];
 
-		this.throttledDelayer = new ThrottledDelayer<boolean>(ParameterHintsModel.DELAY);
+		this.throttledDelayer = new RunOnceScheduler(() => this.doTrigger(), ParameterHintsModel.DELAY);
 
 		this.active = false;
-		this.prevResult = null;
 
-		this.event(this.editor, EventType.ModelChanged, e => this.onModelChanged());
-		this.event(this.editor, EventType.ModelModeChanged, encodeURI => this.onModelChanged());
-		this.event(this.editor, EventType.ModelModeSupportChanged, e => this.onModeChanged(e));
-		this.event(this.editor, EventType.CursorSelectionChanged, e => this.onCursorChange(e));
-		this.toDispose.push(ParameterHintsRegistry.onDidChange(this.onModelChanged, this));
+		this._register(this.editor.onDidChangeModel(e => this.onModelChanged()));
+		this._register(this.editor.onDidChangeModelMode(_ => this.onModelChanged()));
+		this._register(this.editor.onDidChangeCursorSelection(e => this.onCursorChange(e)));
+		this._register(SignatureHelpProviderRegistry.onDidChange(this.onModelChanged, this));
 		this.onModelChanged();
 	}
 
-	public cancel(silent: boolean = false, refresh: boolean = false): void {
+	public cancel(silent: boolean = false): void {
 		this.active = false;
-
-		if (!refresh) {
-			this.prevResult = null;
-		}
 
 		this.throttledDelayer.cancel();
 
 		if (!silent) {
-			this.emit('cancel');
+			this._onCancel.fire(void 0);
 		}
 	}
 
-	public trigger(triggerCharacter?: string, delay: number = ParameterHintsModel.DELAY): TPromise<boolean> {
-		if (!ParameterHintsRegistry.has(this.editor.getModel())) {
+	public trigger(delay = ParameterHintsModel.DELAY): void {
+		if (!SignatureHelpProviderRegistry.has(this.editor.getModel())) {
 			return;
 		}
 
-		this.cancel(true, true);
-		return this.throttledDelayer.trigger(() => this.doTrigger(triggerCharacter), delay);
+		this.cancel(true);
+		return this.throttledDelayer.schedule(delay);
 	}
 
-	public doTrigger(triggerCharacter: string): TPromise<boolean> {
-		return getParameterHints(this.editor.getModel(), this.editor.getPosition(), triggerCharacter)
-			.then<IParameterHints>(null, onUnexpectedError)
+	private doTrigger(): void {
+		provideSignatureHelp(this.editor.getModel(), this.editor.getPosition())
+			.then<SignatureHelp>(null, onUnexpectedError)
 			.then(result => {
 				if (!result || result.signatures.length === 0) {
 					this.cancel();
-					this.emit('cancel');
+					this._onCancel.fire(void 0);
 					return false;
 				}
 
 				this.active = true;
-				this.prevResult = result;
 
 				var event:IHintEvent = { hints: result };
-				this.emit('hint', event);
+				this._onHint.fire(event);
 				return true;
 			});
 	}
 
 	public isTriggered():boolean {
-		return this.active || this.throttledDelayer.isTriggered();
+		return this.active || this.throttledDelayer.isScheduled();
 	}
 
 	private onModelChanged(): void {
+		if (this.active) {
+			this.cancel();
+		}
 		this.triggerCharactersListeners = dispose(this.triggerCharactersListeners);
 
 		var model = this.editor.getModel();
@@ -103,31 +101,16 @@ export class ParameterHintsModel extends EventEmitter {
 			return;
 		}
 
-		let support = ParameterHintsRegistry.ordered(model)[0];
+		let support = SignatureHelpProviderRegistry.ordered(model)[0];
 		if (!support) {
 			return;
 		}
 
-		this.triggerCharactersListeners = support.getParameterHintsTriggerCharacters().map((ch) => {
-			let listener = this.editor.addTypingListener(ch, () => {
-				let position = this.editor.getPosition();
-				let lineContext = model.getLineContext(position.lineNumber);
-
-				if (!support.shouldTriggerParameterHints(lineContext, position.column - 1)) {
-					return;
-				}
-
-				this.trigger(ch);
+		this.triggerCharactersListeners = support.signatureHelpTriggerCharacters.map((ch) => {
+			return this.editor.addTypingListener(ch, () => {
+				this.trigger();
 			});
-
-			return { dispose: listener };
 		});
-	}
-
-	private onModeChanged(e: IModeSupportChangedEvent): void {
-		if (e.parameterHintsSupport) {
-			this.onModelChanged();
-		}
 	}
 
 	private onCursorChange(e: ICursorSelectionChangedEvent): void {
@@ -138,17 +121,10 @@ export class ParameterHintsModel extends EventEmitter {
 		}
 	}
 
-	private event(emitter: IEventEmitter, eventType: string, cb: ListenerCallback): void {
-		this.toDispose.push(emitter.addListener2(eventType, cb));
-	}
-
 	public dispose(): void {
 		this.cancel(true);
 
 		this.triggerCharactersListeners = dispose(this.triggerCharactersListeners);
-		this.toDispose = dispose(this.toDispose);
-
-		this.emit('destroy', null);
 
 		super.dispose();
 	}

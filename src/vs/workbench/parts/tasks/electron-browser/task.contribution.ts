@@ -17,7 +17,7 @@ import { IStringDictionary } from 'vs/base/common/collections';
 import { Action } from 'vs/base/common/actions';
 import * as Dom from 'vs/base/browser/dom';
 import { IDisposable, dispose } from 'vs/base/common/lifecycle';
-import { EventEmitter, ListenerUnbind } from 'vs/base/common/eventEmitter';
+import { EventEmitter } from 'vs/base/common/eventEmitter';
 import * as Builder from 'vs/base/browser/builder';
 import * as Types from 'vs/base/common/types';
 import { KeyMod, KeyCode } from 'vs/base/common/keyCodes';
@@ -35,7 +35,7 @@ import { IEditor } from 'vs/platform/editor/common/editor';
 import { IMessageService } from 'vs/platform/message/common/message';
 import { IMarkerService, MarkerStatistics } from 'vs/platform/markers/common/markers';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
-import { IConfigurationService, ConfigurationServiceEventTypes } from 'vs/platform/configuration/common/configuration';
+import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { IFileService, FileChangesEvent, FileChangeType, EventType as FileEventType } from 'vs/platform/files/common/files';
 import { IExtensionService } from 'vs/platform/extensions/common/extensions';
 
@@ -50,6 +50,7 @@ import { IStatusbarItem, IStatusbarRegistry, Extensions as StatusbarExtensions, 
 import { IQuickOpenRegistry, Extensions as QuickOpenExtensions, QuickOpenHandlerDescriptor } from 'vs/workbench/browser/quickopen';
 
 import { IQuickOpenService } from 'vs/workbench/services/quickopen/common/quickOpenService';
+import { IPanelService } from 'vs/workbench/services/panel/common/panelService';
 import { IWorkbenchEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { IWorkspaceContextService } from 'vs/workbench/services/workspace/common/contextService';
 
@@ -228,7 +229,7 @@ class ConfigureTaskRunnerAction extends Action {
 							let content = JSON.stringify(config, null, '\t');
 							content = [
 								'{',
-									'\t// See http://go.microsoft.com/fwlink/?LinkId=733558',
+									'\t// See https://go.microsoft.com/fwlink/?LinkId=733558',
 									'\t// for the documentation about the tasks.json format',
 							].join('\n') + content.substr(1);
 							return content;
@@ -356,7 +357,7 @@ class RunTaskAction extends AbstractTaskAction {
 
 class StatusBarItem implements IStatusbarItem {
 
-	private quickOpenService: IQuickOpenService;
+	private panelService: IPanelService;
 	private markerService: IMarkerService;
 	private taskService:ITaskService;
 	private outputService: IOutputService;
@@ -365,11 +366,11 @@ class StatusBarItem implements IStatusbarItem {
 	private activeCount: number;
 	private static progressChars:string = '|/-\\';
 
-	constructor(@IQuickOpenService quickOpenService:IQuickOpenService,
+	constructor(@IPanelService panelService:IPanelService,
 		@IMarkerService markerService:IMarkerService, @IOutputService outputService:IOutputService,
 		@ITaskService taskService:ITaskService) {
 
-		this.quickOpenService = quickOpenService;
+		this.panelService = panelService;
 		this.markerService = markerService;
 		this.outputService = outputService;
 		this.taskService = taskService;
@@ -417,7 +418,7 @@ class StatusBarItem implements IStatusbarItem {
 //		}));
 
 		callOnDispose.push(Dom.addDisposableListener(label, 'click', (e:MouseEvent) => {
-			this.quickOpenService.show('!');
+			this.panelService.openPanel('workbench.panel.markers', true);
 		}));
 
 		let updateStatus = (element:HTMLDivElement, stats:number): boolean => {
@@ -560,11 +561,11 @@ class TaskService extends EventEmitter implements ITaskService {
 
 	private _taskSystemPromise: TPromise<ITaskSystem>;
 	private _taskSystem: ITaskSystem;
-	private taskSystemListeners: ListenerUnbind[];
+	private taskSystemListeners: IDisposable[];
 	private clearTaskSystemPromise: boolean;
 	private outputChannel: IOutputChannel;
 
-	private fileChangesListener: ListenerUnbind;
+	private fileChangesListener: IDisposable;
 
 	constructor(@IModeService modeService: IModeService, @IConfigurationService configurationService: IConfigurationService,
 		@IMarkerService markerService: IMarkerService, @IOutputService outputService: IOutputService,
@@ -594,7 +595,7 @@ class TaskService extends EventEmitter implements ITaskService {
 		this.taskSystemListeners = [];
 		this.clearTaskSystemPromise = false;
 		this.outputChannel = this.outputService.getChannel(TaskService.OutputChannelId);
-		this.configurationService.addListener(ConfigurationServiceEventTypes.UPDATED, () => {
+	this.configurationService.onDidUpdateConfiguration(() => {
 			this.emit(TaskServiceEvents.ConfigChanged);
 			if (this._taskSystem && this._taskSystem.isActiveSync()) {
 				this.clearTaskSystemPromise = true;
@@ -609,13 +610,12 @@ class TaskService extends EventEmitter implements ITaskService {
 	}
 
 	private disposeTaskSystemListeners(): void {
-		this.taskSystemListeners.forEach(unbind => unbind());
-		this.taskSystemListeners = [];
+		this.taskSystemListeners = dispose(this.taskSystemListeners);
 	}
 
 	private disposeFileChangesListener(): void {
 		if (this.fileChangesListener) {
-			this.fileChangesListener();
+			this.fileChangesListener.dispose();
 			this.fileChangesListener = null;
 		}
 	}
@@ -694,8 +694,8 @@ class TaskService extends EventEmitter implements ITaskService {
 							this._taskSystemPromise = null;
 							throw new TaskError(Severity.Info, nls.localize('TaskSystem.noBuildType', "No valid task runner configured. Supported task runners are 'service' and 'program'."), TaskErrors.NoValidTaskRunner);
 						}
-						this.taskSystemListeners.push(result.addListener(TaskSystemEvents.Active, (event) => this.emit(TaskServiceEvents.Active, event)));
-						this.taskSystemListeners.push(result.addListener(TaskSystemEvents.Inactive, (event) => this.emit(TaskServiceEvents.Inactive, event)));
+						this.taskSystemListeners.push(result.addListener2(TaskSystemEvents.Active, (event) => this.emit(TaskServiceEvents.Active, event)));
+						this.taskSystemListeners.push(result.addListener2(TaskSystemEvents.Inactive, (event) => this.emit(TaskServiceEvents.Inactive, event)));
 						this._taskSystem = result;
 						return result;
 					}, (err: any) => {
@@ -773,7 +773,7 @@ class TaskService extends EventEmitter implements ITaskService {
 					then((runResult: ITaskRunResult) => {
 						if (runResult.restartOnFileChanges) {
 							let pattern = runResult.restartOnFileChanges;
-							this.fileChangesListener = this.eventService.addListener(FileEventType.FILE_CHANGES, (event: FileChangesEvent) => {
+							this.fileChangesListener = this.eventService.addListener2(FileEventType.FILE_CHANGES, (event: FileChangesEvent) => {
 								let needsRestart = event.changes.some((change) => {
 									return (change.type === FileChangeType.ADDED || change.type === FileChangeType.DELETED) && !!match(pattern, change.resource.fsPath);
 								});
@@ -888,14 +888,14 @@ class TaskService extends EventEmitter implements ITaskService {
 
 let tasksCategory = nls.localize('tasksCategory', "Tasks");
 let workbenchActionsRegistry = <IWorkbenchActionRegistry>Registry.as(WorkbenchActionExtensions.WorkbenchActions);
-workbenchActionsRegistry.registerWorkbenchAction(new SyncActionDescriptor(ConfigureTaskRunnerAction, ConfigureTaskRunnerAction.ID, ConfigureTaskRunnerAction.TEXT), 'Configure Task Runner', tasksCategory);
-workbenchActionsRegistry.registerWorkbenchAction(new SyncActionDescriptor(BuildAction, BuildAction.ID, BuildAction.TEXT, { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_B }), 'Run Build Task', tasksCategory);
-workbenchActionsRegistry.registerWorkbenchAction(new SyncActionDescriptor(TestAction, TestAction.ID, TestAction.TEXT), 'Run Test Task', tasksCategory);
+workbenchActionsRegistry.registerWorkbenchAction(new SyncActionDescriptor(ConfigureTaskRunnerAction, ConfigureTaskRunnerAction.ID, ConfigureTaskRunnerAction.TEXT), 'Tasks: Configure Task Runner', tasksCategory);
+workbenchActionsRegistry.registerWorkbenchAction(new SyncActionDescriptor(BuildAction, BuildAction.ID, BuildAction.TEXT, { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_B }), 'Tasks: Run Build Task', tasksCategory);
+workbenchActionsRegistry.registerWorkbenchAction(new SyncActionDescriptor(TestAction, TestAction.ID, TestAction.TEXT), 'Tasks: Run Test Task', tasksCategory);
 // workbenchActionsRegistry.registerWorkbenchAction(new SyncActionDescriptor(RebuildAction, RebuildAction.ID, RebuildAction.TEXT), tasksCategory);
 // workbenchActionsRegistry.registerWorkbenchAction(new SyncActionDescriptor(CleanAction, CleanAction.ID, CleanAction.TEXT), tasksCategory);
-workbenchActionsRegistry.registerWorkbenchAction(new SyncActionDescriptor(TerminateAction, TerminateAction.ID, TerminateAction.TEXT), 'Terminate Running Task', tasksCategory);
-workbenchActionsRegistry.registerWorkbenchAction(new SyncActionDescriptor(ShowLogAction, ShowLogAction.ID, ShowLogAction.TEXT), 'Show Task Log', tasksCategory);
-workbenchActionsRegistry.registerWorkbenchAction(new SyncActionDescriptor(RunTaskAction, RunTaskAction.ID, RunTaskAction.TEXT), 'Run Task', tasksCategory);
+workbenchActionsRegistry.registerWorkbenchAction(new SyncActionDescriptor(TerminateAction, TerminateAction.ID, TerminateAction.TEXT), 'Tasks: Terminate Running Task', tasksCategory);
+workbenchActionsRegistry.registerWorkbenchAction(new SyncActionDescriptor(ShowLogAction, ShowLogAction.ID, ShowLogAction.TEXT), 'Tasks: Show Task Log', tasksCategory);
+workbenchActionsRegistry.registerWorkbenchAction(new SyncActionDescriptor(RunTaskAction, RunTaskAction.ID, RunTaskAction.TEXT), 'Tasks: Run Task', tasksCategory);
 
 // Task Service
 registerSingleton(ITaskService, TaskService);

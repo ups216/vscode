@@ -10,7 +10,7 @@ import {create} from 'vs/base/common/types';
 import * as assert from 'vs/base/common/assert';
 import {Graph} from 'vs/base/common/graph';
 import {SyncDescriptor, AsyncDescriptor} from 'vs/platform/instantiation/common/descriptors';
-import {ServiceIdentifier, IInstantiationService, ServicesAccessor, _util} from 'vs/platform/instantiation/common/instantiation';
+import {ServiceIdentifier, IInstantiationService, ServicesAccessor, _util, optional} from 'vs/platform/instantiation/common/instantiation';
 import {ServiceCollection} from 'vs/platform/instantiation/common/serviceCollection';
 
 
@@ -19,9 +19,11 @@ export class InstantiationService implements IInstantiationService {
 	serviceId: any;
 
 	private _services: ServiceCollection;
+	private _strict: boolean;
 
-	constructor(services: ServiceCollection = new ServiceCollection()) {
+	constructor(services: ServiceCollection = new ServiceCollection(), strict: boolean = false) {
 		this._services = services;
+		this._strict = strict;
 
 		this._services.set(IInstantiationService, this);
 	}
@@ -32,15 +34,19 @@ export class InstantiationService implements IInstantiationService {
 				services.set(id, thing);
 			}
 		});
-		return new InstantiationService(services);
+		return new InstantiationService(services, this._strict);
 	}
 
 	invokeFunction<R>(signature: (accessor: ServicesAccessor, ...more: any[]) => R, ...args: any[]): R {
 		let accessor: ServicesAccessor;
 		try {
 			accessor = {
-				get: <T>(id: ServiceIdentifier<T>) => {
-					return this._getOrCreateServiceInstance(id);
+				get: <T>(id: ServiceIdentifier<T>, isOptional?: typeof optional) => {
+					const result = this._getOrCreateServiceInstance(id);
+					if (!result && isOptional !== optional) {
+						throw new Error(`[invokeFunction] unkown service '${id}'`);
+					}
+					return result;
 				}
 			};
 			return signature.apply(undefined, [accessor].concat(args));
@@ -111,7 +117,13 @@ export class InstantiationService implements IInstantiationService {
 
 		// arguments defined by service decorators
 		let serviceDependencies = _util.getServiceDependencies(desc.ctor).sort((a, b) => a.index - b.index);
-		let serviceArgs = serviceDependencies.map(dependency => this._getOrCreateServiceInstance(dependency.id));
+		let serviceArgs = serviceDependencies.map(dependency => {
+			let service = this._getOrCreateServiceInstance(dependency.id);
+			if (!service && this._strict && !dependency.optional) {
+				throw new Error(`[createInstance] ${desc.ctor.name} depends on UNKNOWN service ${dependency.id}.`);
+			}
+			return service;
+		});
 		let firstServiceArgPos = serviceDependencies.length > 0 ? serviceDependencies[0].index : staticArgs.length;
 
 		// check for argument mismatches, adjust static args if needed

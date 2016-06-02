@@ -8,7 +8,7 @@
 import 'vs/css!./clipboard';
 import * as nls from 'vs/nls';
 import {KeyCode, KeyMod} from 'vs/base/common/keyCodes';
-import {cAll} from 'vs/base/common/lifecycle';
+import {dispose, IDisposable} from 'vs/base/common/lifecycle';
 import {TPromise} from 'vs/base/common/winjs.base';
 import * as browser from 'vs/base/browser/browser';
 import {ServicesAccessor} from 'vs/platform/instantiation/common/instantiation';
@@ -21,18 +21,18 @@ import {CommonEditorRegistry, ContextKey, EditorActionDescriptor} from 'vs/edito
 
 class ClipboardWritingAction extends EditorAction {
 
-	private toUnhook:Function[];
+	private toUnhook:IDisposable[];
 
 	constructor(descriptor:editorCommon.IEditorActionDescriptorData, editor:editorCommon.ICommonCodeEditor, condition:Behaviour) {
 		super(descriptor, editor, condition);
 		this.toUnhook = [];
-		this.toUnhook.push(this.editor.addListener(editorCommon.EventType.CursorSelectionChanged, (e:editorCommon.ICursorSelectionChangedEvent) => {
+		this.toUnhook.push(this.editor.onDidChangeCursorSelection((e:editorCommon.ICursorSelectionChangedEvent) => {
 			this.resetEnablementState();
 		}));
 	}
 
 	public dispose(): void {
-		this.toUnhook = cAll(this.toUnhook);
+		this.toUnhook = dispose(this.toUnhook);
 		super.dispose();
 	}
 
@@ -166,13 +166,11 @@ registerClipboardAction({
 }, 'Paste');
 
 function execCommandToHandler(actionId: string, browserCommand: string, accessor: ServicesAccessor, args: any): void {
-	// If editor text focus
-	if (args.context[editorCommon.KEYBINDING_CONTEXT_EDITOR_TEXT_FOCUS]) {
-		var focusedEditor = findFocusedEditor(actionId, accessor, args, false);
-		if (focusedEditor) {
-			focusedEditor.trigger('keyboard', actionId, args);
-			return;
-		}
+	let focusedEditor = findFocusedEditor(actionId, accessor, false);
+	// Only if editor text focus (i.e. not if editor has widget focus).
+	if (focusedEditor && focusedEditor.isFocused()) {
+		focusedEditor.trigger('keyboard', actionId, args);
+		return;
 	}
 
 	document.execCommand(browserCommand);

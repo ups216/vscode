@@ -10,6 +10,8 @@ import {XHROptions, XHRResponse, getErrorStatusDescription} from 'request-light'
 import URI from './utils/uri';
 import Strings = require('./utils/strings');
 import Parser = require('./jsonParser');
+import {RemoteConsole} from 'vscode-languageserver';
+
 
 import * as nls from 'vscode-nls';
 const localize = nls.loadMessageBundle();
@@ -204,7 +206,7 @@ export interface ITelemetryService {
 }
 
 export interface IWorkspaceContextService {
-	toResource(workspaceRelativePath: string): string;
+	resolveRelativePath(relativePath: string, resource: string): string;
 }
 
 export interface IRequestService {
@@ -225,7 +227,7 @@ export class JSONSchemaService implements IJSONSchemaService {
 	private telemetryService: ITelemetryService;
 	private requestService: IRequestService;
 
-	constructor(requestService: IRequestService, contextService?: IWorkspaceContextService, telemetryService?: ITelemetryService) {
+	constructor(requestService: IRequestService, contextService?: IWorkspaceContextService, telemetryService?: ITelemetryService, private console?: RemoteConsole) {
 		this.contextService = contextService;
 		this.requestService = requestService;
 		this.telemetryService = telemetryService;
@@ -254,10 +256,8 @@ export class JSONSchemaService implements IJSONSchemaService {
 	}
 
 	private normalizeId(id: string) {
-		if (id.length > 0 && id.charAt(id.length - 1) === '#') {
-			return id.substring(0, id.length - 1);
-		}
-		return id;
+		// remove trailing '#', normalize drive capitalization
+		return URI.parse(id).toString();
 	}
 
 	public setSchemaContributions(schemaContributions: ISchemaContributions): void {
@@ -473,13 +473,8 @@ export class JSONSchemaService implements IJSONSchemaService {
 			let schemaProperties = (<Parser.ObjectASTNode>document.root).properties.filter((p) => (p.key.value === '$schema') && !!p.value);
 			if (schemaProperties.length > 0) {
 				let schemeId = <string>schemaProperties[0].value.getValue();
-				if (!Strings.startsWith(schemeId, 'http://') && !Strings.startsWith(schemeId, 'https://') && !Strings.startsWith(schemeId, 'file://')) {
-					if (this.contextService) {
-						let resourceURL = this.contextService.toResource(schemeId);
-						if (resourceURL) {
-							schemeId = resourceURL.toString();
-						}
-					}
+				if (Strings.startsWith(schemeId, '.') && this.contextService) {
+					schemeId = this.contextService.resolveRelativePath(schemeId, resource);
 				}
 				if (schemeId) {
 					let id = this.normalizeId(schemeId);

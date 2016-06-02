@@ -10,6 +10,7 @@ import glob = require('vs/base/common/glob');
 import objects = require('vs/base/common/objects');
 import scorer = require('vs/base/common/scorer');
 import strings = require('vs/base/common/strings');
+import {getNextTickChannel} from 'vs/base/parts/ipc/common/ipc';
 import {Client} from 'vs/base/parts/ipc/node/ipc.cp';
 import {IProgress, LineMatch, FileMatch, ISearchComplete, ISearchProgressItem, QueryType, IFileMatch, ISearchQuery, ISearchConfiguration, ISearchService} from 'vs/platform/search/common/search';
 import {IUntitledEditorService} from 'vs/workbench/services/untitled/common/untitledEditorService';
@@ -107,7 +108,7 @@ export class SearchService implements ISearchService {
 		if (query.type === QueryType.Text) {
 			let models = this.modelService.getModels();
 			models.forEach((model) => {
-				let resource = model.getAssociatedResource();
+				let resource = model.uri;
 				if (!resource) {
 					return;
 				}
@@ -205,7 +206,7 @@ class DiskSearch {
 			}
 		);
 
-		const channel = client.getChannel<ISearchChannel>('search');
+		const channel = getNextTickChannel(client.getChannel<ISearchChannel>('search'));
 		this.raw = new SearchChannelClient(channel);
 	}
 

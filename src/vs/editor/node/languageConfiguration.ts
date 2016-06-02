@@ -7,7 +7,7 @@
 import * as nls from 'vs/nls';
 import {parse} from 'vs/base/common/json';
 import {readFile} from 'vs/base/node/pfs';
-import {IRichEditConfiguration} from 'vs/editor/common/modes/supports/richEditSupport';
+import {IRichLanguageConfiguration} from 'vs/editor/common/modes/supports/richEditSupport';
 import {IModeService} from 'vs/editor/common/services/modeService';
 import {IAutoClosingPair} from 'vs/editor/common/modes';
 
@@ -70,7 +70,7 @@ export class LanguageConfigurationFileHandler {
 
 	private _handleConfig(modeId:string, configuration:ILanguageConfiguration): void {
 
-		let richEditConfig:IRichEditConfiguration = {};
+		let richEditConfig:IRichLanguageConfiguration = {};
 
 		if (configuration.comments) {
 			richEditConfig.comments = configuration.comments;
@@ -81,17 +81,11 @@ export class LanguageConfigurationFileHandler {
 		}
 
 		if (configuration.autoClosingPairs) {
-			richEditConfig.__characterPairSupport = {
-				autoClosingPairs: this._mapCharacterPairs(configuration.autoClosingPairs)
-			};
-		} else if (configuration.brackets) {
-			richEditConfig.__characterPairSupport = {
-				autoClosingPairs: this._mapCharacterPairs(configuration.brackets)
-			};
+			richEditConfig.autoClosingPairs = this._mapCharacterPairs(configuration.autoClosingPairs);
 		}
 
-		if (richEditConfig.__characterPairSupport && configuration.surroundingPairs) {
-			richEditConfig.__characterPairSupport.surroundingPairs = this._mapCharacterPairs(configuration.surroundingPairs);
+		if (configuration.surroundingPairs) {
+			richEditConfig.surroundingPairs = this._mapCharacterPairs(configuration.surroundingPairs);
 		}
 
 		this._modeService.registerRichEditSupport(modeId, richEditConfig);

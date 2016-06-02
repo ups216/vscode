@@ -15,20 +15,20 @@
 	padding-left: 8px; /* use padding and not margin to avoid overflow issues */
 	padding-right: 8px;
 	display: flex;
-	-webkit-box-sizing:	border-box;
-	-o-box-sizing: border-box;
-	-moz-box-sizing: border-box;
-	-ms-box-sizing: border-box;
 	box-sizing:	border-box;
 	overflow: hidden;
 }
 
 .monaco-workbench > .part > .title > .title-label,
 .monaco-workbench > .part.editor > .content > .one-editor-container > .title .title-label {
-	padding: 12px 0 0 12px;
+	line-height: 35px;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+}
+
+.monaco-workbench > .part > .title > .title-label {
+	padding-left: 12px;
 }
 
 .monaco-workbench > .part.editor > .content > .one-editor-container > .title .title-label {
@@ -38,7 +38,6 @@
 
 .monaco-workbench > .part > .title > .title-label span,
 .monaco-workbench > .part.editor > .content > .one-editor-container > .title .title-label span {
-	line-height: normal;
 	font-size: 11px;
 	cursor: default;
 }
@@ -46,7 +45,6 @@
 .monaco-workbench > .part > .title > .title-label a,
 .monaco-workbench > .part.editor > .content > .one-editor-container > .title .title-label a {
 	text-decoration: none;
-	line-height: normal;
 	font-size: 13px;
 	cursor: pointer;
 }
@@ -62,14 +60,18 @@
 }
 
 .monaco-workbench > .part > .title > .title-actions .action-label,
+.monaco-workbench > .part.editor > .content > .one-editor-container > .title .title-label-actions .action-label,
 .monaco-workbench > .part.editor > .content > .one-editor-container > .title .title-actions .action-label {
 	display: block;
-	margin: 4px 0 0;
-	width: 28px;
-	height: 30px;
+	height: 35px;
 	background-size: 16px;
 	background-position: center center;
 	background-repeat: no-repeat;
+}
+
+.monaco-workbench > .part > .title > .title-actions .action-label,
+.monaco-workbench > .part.editor > .content > .one-editor-container > .title .title-actions .action-label {
+	width: 28px;
 }
 
 .monaco-workbench > .part > .title > .title-actions .action-label .label,

@@ -33,17 +33,11 @@ exports.loaderConfig = function (emptyPaths) {
 	var result = {
 		paths: {
 			'vs': 'out-build/vs',
-			'vs/extensions': 'extensions',
 			'vscode': 'empty:'
 		},
-		'vs/text': {
-			paths: {
-				'vs/extensions': 'extensions'
-			}
-		}
+		nodeModules: emptyPaths||[]
 	};
 
-	(emptyPaths || []).forEach(function(m) { result.paths[m] = 'empty:'; });
 	return result;
 };
 
@@ -55,7 +49,6 @@ function loader(bundledFileHeader) {
 		'out-build/vs/loader.js',
 		'out-build/vs/css.js',
 		'out-build/vs/nls.js',
-		'out-build/vs/text.js'
 	], { base: 'out-build' })
 		.pipe(es.through(function(data) {
 			if (isFirst) {
@@ -174,7 +167,9 @@ exports.optimizeTask = function(opts) {
 				addComment: true,
 				includeContent: true
 			}))
-			.pipe(i18n.processNlsFiles())
+			.pipe(i18n.processNlsFiles({
+				fileHeader: bundledFileHeader
+			}))
 			.pipe(gulp.dest(out));
 	};
 };
@@ -244,7 +239,7 @@ exports.minifyTask = function (src, addSourceMapsComment) {
 			.pipe(uglifyWithCopyrights())
 			.pipe(jsFilter.restore)
 			.pipe(cssFilter)
-			.pipe(minifyCSS())
+			.pipe(minifyCSS({ reduceIdents: false }))
 			.pipe(cssFilter.restore)
 			.pipe(sourcemaps.write('./', {
 				sourceMappingURL: function (file) {

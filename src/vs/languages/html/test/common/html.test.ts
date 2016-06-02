@@ -60,6 +60,11 @@ class MockJSMode extends MockTokenizingMode {
 					// e.g.  */|
 					beforeText: /^(\t|(\ \ ))*\ \*\/\s*$/,
 					action: { indentAction: Modes.IndentAction.None, removeText: 1 }
+				},
+				{
+					// e.g.  *-----*/|
+					beforeText: /^(\t|(\ \ ))*\ \*[^/]*\*\/\s*$/,
+					action: { indentAction: Modes.IndentAction.None, removeText: 1 }
 				}
 			]
 		});
@@ -466,7 +471,7 @@ suite('Colorizing - HTML', () => {
 		]);
 	});
 
-	test('Tag with empty atrributes', () => {
+	test('Tag with empty attributes', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: '<abc foo="">',
 			tokens: [
@@ -483,7 +488,7 @@ suite('Colorizing - HTML', () => {
 
 	test('Tag with Attributes', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
-			line: '<abc foo="bar" bar="foo">',
+			line: '<abc foo="bar" bar=\'foo\'>',
 			tokens: [
 				{ startIndex:0, type: DELIM_START },
 				{ startIndex:1, type: getTag('abc') },
@@ -495,6 +500,25 @@ suite('Colorizing - HTML', () => {
 				{ startIndex:15, type: ATTRIB_NAME },
 				{ startIndex:18, type: DELIM_ASSIGN },
 				{ startIndex:19, type: ATTRIB_VALUE },
+				{ startIndex:24, type: DELIM_START }
+			]}
+		]);
+	});
+
+	test('Tag with Attributes, no quotes', () => {
+		modesUtil.assertTokenization(tokenizationSupport, [{
+			line: '<abc foo=bar bar=help-me>',
+			tokens: [
+				{ startIndex:0, type: DELIM_START },
+				{ startIndex:1, type: getTag('abc') },
+				{ startIndex:4, type: '' },
+				{ startIndex:5, type: ATTRIB_NAME },
+				{ startIndex:8, type: DELIM_ASSIGN },
+				{ startIndex:9, type: ATTRIB_VALUE },
+				{ startIndex:12, type: '' },
+				{ startIndex:13, type: ATTRIB_NAME },
+				{ startIndex:16, type: DELIM_ASSIGN },
+				{ startIndex:17, type: ATTRIB_VALUE },
 				{ startIndex:24, type: DELIM_START }
 			]}
 		]);
@@ -561,7 +585,7 @@ suite('Colorizing - HTML', () => {
 		]);
 	});
 
-	test('Tag with Invalid Attribute Name', () => {
+	test('Tag with Interesting Attribute Name', () => {
 		modesUtil.assertTokenization(tokenizationSupport, [{
 			line: '<abc foo!@#="bar">',
 			tokens: [
@@ -569,10 +593,34 @@ suite('Colorizing - HTML', () => {
 				{ startIndex:1, type: getTag('abc') },
 				{ startIndex:4, type: '' },
 				{ startIndex:5, type: ATTRIB_NAME },
-				{ startIndex:8, type: '' },
-				{ startIndex:13, type: ATTRIB_NAME },
-				{ startIndex:16, type: '' },
+				{ startIndex:11, type: DELIM_ASSIGN },
+				{ startIndex:12, type: ATTRIB_VALUE },
 				{ startIndex:17, type: DELIM_START }
+			]}
+		]);
+	});
+
+	test('Tag with Angular Attribute Name', () => {
+		modesUtil.assertTokenization(tokenizationSupport, [{
+			line: '<abc #myinput (click)="bar" [value]="someProperty" *ngIf="someCondition">',
+			tokens: [
+				{ startIndex:0, type: DELIM_START },
+				{ startIndex:1, type: getTag('abc') },
+				{ startIndex:4, type: '' },
+				{ startIndex:5, type: ATTRIB_NAME },
+				{ startIndex:13, type: '' },
+				{ startIndex:14, type: ATTRIB_NAME },
+				{ startIndex:21, type: DELIM_ASSIGN },
+				{ startIndex:22, type: ATTRIB_VALUE },
+				{ startIndex:27, type: '' },
+				{ startIndex:28, type: ATTRIB_NAME },
+				{ startIndex:35, type: DELIM_ASSIGN },
+				{ startIndex:36, type: ATTRIB_VALUE },
+				{ startIndex:50, type: '' },
+				{ startIndex:51, type: ATTRIB_NAME },
+				{ startIndex:56, type: DELIM_ASSIGN },
+				{ startIndex:57, type: ATTRIB_VALUE },
+				{ startIndex:72, type: DELIM_START }
 			]}
 		]);
 	});
@@ -706,15 +754,15 @@ suite('Colorizing - HTML', () => {
 
 	test('matchBracket', () => {
 
-		function toString(brackets:EditorCommon.IEditorRange[]): string[] {
+		function toString(brackets:[Range, Range]): [string,string] {
 			if (!brackets) {
 				return null;
 			}
 			brackets.sort(Range.compareRangesUsingStarts);
-			return brackets.map(b => b.toString());
+			return [brackets[0].toString(), brackets[1].toString()];
 		}
 
-		function assertBracket(lines:string[], lineNumber:number, column:number, expected:EditorCommon.IEditorRange[]): void {
+		function assertBracket(lines:string[], lineNumber:number, column:number, expected:[Range, Range]): void {
 			let model = new TextModelWithTokens([], TextModel.toRawText(lines.join('\n'), TextModel.DEFAULT_CREATION_OPTIONS), false, _mode);
 			// force tokenization
 			model.getLineContext(model.getLineCount());
@@ -722,9 +770,7 @@ suite('Colorizing - HTML', () => {
 				lineNumber: lineNumber,
 				column: column
 			});
-			let actualStr = actual ? toString(actual.brackets) : null;
-			let expectedStr = toString(expected);
-			assert.deepEqual(actualStr, expectedStr, 'TEXT <<' + lines.join('\n') + '>>, POS: ' + lineNumber + ', ' + column);
+			assert.deepEqual(toString(actual), toString(expected), 'TEXT <<' + lines.join('\n') + '>>, POS: ' + lineNumber + ', ' + column);
 		}
 
 		assertBracket(['<p></p>'], 1, 1, [new Range(1, 1, 1, 2), new Range(1, 3, 1, 4)]);

@@ -18,23 +18,35 @@ import * as editorCommon from 'vs/editor/common/editorCommon';
 import {Model} from 'vs/editor/common/model/model';
 import {MockCodeEditorService} from 'vs/editor/test/common/mocks/mockCodeEditorService';
 import {MockConfiguration} from 'vs/editor/test/common/mocks/mockConfiguration';
+import {Range} from 'vs/editor/common/core/range';
 
 export class MockCodeEditor extends CommonCodeEditor {
 	protected _createConfiguration(options:editorCommon.ICodeEditorWidgetCreationOptions): CommonEditorConfiguration {
 		return new MockConfiguration(options);
 	}
-	public getCenteredRangeInViewport(): editorCommon.IEditorRange { return null; }
-	public setScrollTop(newScrollTop:number): void { }
-	public getScrollTop(): number { return 0; }
-	public setScrollLeft(newScrollLeft:number): void { }
-	public getScrollLeft(): number { return 0; }
+	public getCenteredRangeInViewport(): Range { return null; }
+
 	public getScrollWidth(): number { return 0; }
+	public getScrollLeft(): number { return 0; }
+
 	public getScrollHeight(): number { return 0; }
+	public getScrollTop(): number { return 0; }
+
+	public setScrollLeft(newScrollLeft:number): void { }
+	public setScrollTop(newScrollTop:number): void { }
+	public setScrollPosition(position: editorCommon.INewScrollPosition): void { }
+
 	public saveViewState(): editorCommon.ICodeEditorViewState { return null; }
 	public restoreViewState(state:editorCommon.IEditorViewState): void { }
+
 	public layout(dimension?:editorCommon.IDimension): void { }
+
 	public focus(): void { }
+	public beginForcedWidgetFocus(): void { }
+	public endForcedWidgetFocus(): void { }
 	public isFocused(): boolean { return true; }
+	public hasWidgetFocus(): boolean { return true; };
+
 	protected _enableEmptySelectionClipboard(): boolean { return false; }
 	protected _createView(): void { }
 	protected _getViewInternalEventBus(): IEventEmitter { return new EventEmitter(); }

@@ -9,16 +9,19 @@ import debug = require('vs/workbench/parts/debug/common/debug');
 export class ViewModel implements debug.IViewModel {
 
 	private focusedStackFrame: debug.IStackFrame;
+	private focusedThread: debug.IThread;
 	private selectedExpression: debug.IExpression;
 	private selectedFunctionBreakpoint: debug.IFunctionBreakpoint;
 	private _onDidFocusStackFrame: Emitter<debug.IStackFrame>;
 	private _onDidSelectExpression: Emitter<debug.IExpression>;
 	private _onDidSelectFunctionBreakpoint: Emitter<debug.IFunctionBreakpoint>;
+	public changedWorkbenchViewState: boolean;
 
 	constructor() {
 		this._onDidFocusStackFrame = new Emitter<debug.IStackFrame>();
 		this._onDidSelectExpression = new Emitter<debug.IExpression>();
 		this._onDidSelectFunctionBreakpoint = new Emitter<debug.IFunctionBreakpoint>();
+		this.changedWorkbenchViewState = false;
 	}
 
 	public getId(): string {
@@ -29,8 +32,9 @@ export class ViewModel implements debug.IViewModel {
 		return this.focusedStackFrame;
 	}
 
-	public setFocusedStackFrame(focusedStackFrame: debug.IStackFrame): void {
+	public setFocusedStackFrame(focusedStackFrame: debug.IStackFrame, focusedThread: debug.IThread): void {
 		this.focusedStackFrame = focusedStackFrame;
+		this.focusedThread = focusedThread;
 		this._onDidFocusStackFrame.fire(focusedStackFrame);
 	}
 
@@ -39,7 +43,7 @@ export class ViewModel implements debug.IViewModel {
 	}
 
 	public getFocusedThreadId(): number {
-		return this.focusedStackFrame ? this.focusedStackFrame.threadId : 0;
+		return this.focusedThread ? this.focusedThread.threadId : 0;
 	}
 
 	public getSelectedExpression(): debug.IExpression {

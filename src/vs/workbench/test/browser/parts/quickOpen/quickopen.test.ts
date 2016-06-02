@@ -6,25 +6,26 @@
 'use strict';
 
 import * as assert from 'assert';
-import {TestContextService, TestStorageService, TestEventService, TestEditorService, TestQuickOpenService} from 'vs/workbench/test/browser/servicesTestUtils';
+import 'vs/workbench/browser/parts/editor/editor.contribution'; // make sure to load all contributed editor things into tests
+import {TestContextService, TestStorageService, TestEventService, TestEditorService, TestQuickOpenService} from 'vs/workbench/test/common/servicesTestUtils';
 import {MockKeybindingService} from 'vs/platform/keybinding/test/common/mockKeybindingService';
 import {Registry} from 'vs/platform/platform';
 import {EditorHistoryModel, EditorHistoryEntry} from 'vs/workbench/browser/parts/quickopen/editorHistoryModel';
-import {QuickOpenHandlerDescriptor, IQuickOpenRegistry, Extensions as QuickOpenExtensions} from 'vs/workbench/browser/quickopen';
+import {QuickOpenHandlerDescriptor, IQuickOpenRegistry, Extensions as QuickOpenExtensions, QuickOpenAction} from 'vs/workbench/browser/quickopen';
 import {QuickOpenController} from 'vs/workbench/browser/parts/quickopen/quickOpenController';
 import {Mode} from 'vs/base/parts/quickopen/common/quickOpen';
-import {QuickOpenAction} from 'vs/workbench/browser/actions/quickOpenAction';
 import {StringEditorInput} from 'vs/workbench/common/editor/stringEditorInput';
 import {EditorInput} from 'vs/workbench/common/editor';
+import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
 import {isEmptyObject} from 'vs/base/common/types';
+import {IEventService} from 'vs/platform/event/common/event';
 import {join} from 'vs/base/common/paths';
 import {Extensions, IEditorRegistry} from 'vs/workbench/browser/parts/editor/baseEditor';
 import URI from 'vs/base/common/uri';
 import {ServiceCollection} from 'vs/platform/instantiation/common/serviceCollection';
 import {InstantiationService} from 'vs/platform/instantiation/common/instantiationService';
 import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
-import {EventType, EditorEvent} from 'vs/workbench/common/events';
-import {Position} from 'vs/platform/editor/common/editor';
+import {EventType} from 'vs/workbench/common/events';
 
 function toResource(path) {
 	return URI.file(join('C:\\', path));
@@ -71,35 +72,23 @@ suite('Workbench QuickOpen', () => {
 		assert(!entry1.matches(entry2.getInput()));
 		assert(entry1.matches(entry1.getInput()));
 
-		assert(entry1.run(Mode.OPEN, { event: null, quickNavigateConfiguration: null }));
-		assert(!entry2.run(Mode.PREVIEW, { event: null, quickNavigateConfiguration: null }));
-	});
-
-	test('EditorHistoryEntry is removed when open fails', () => {
-		let editorService = new TestEditorService();
-		let contextService = new TestContextService();
-		let inst = new InstantiationService();
-
-		let model = new EditorHistoryModel(editorService, null, contextService);
-
-		let input1 = inst.createInstance(StringEditorInput, 'name1', 'description', 'value1', 'text/plain', false);
-
-		model.add(input1);
-
-		assert.equal(1, model.getEntries().length);
-
-		assert(model.getEntries()[0].run(Mode.OPEN, { event: null, quickNavigateConfiguration: null }));
-
-		assert.equal(0, model.getEntries().length);
+		assert(entry1.run(Mode.OPEN, { event: null, quickNavigateConfiguration: null, keymods: [] }));
+		assert(!entry2.run(Mode.PREVIEW, { event: null, quickNavigateConfiguration: null, keymods: [] }));
 	});
 
 	test('EditorHistoryModel', () => {
 		Registry.as('workbench.contributions.editors').setInstantiationService(new InstantiationService());
 
+		let services = new ServiceCollection();
+
+		let eventService = new TestEventService();
 		let editorService = new TestEditorService();
 		let contextService = new TestContextService();
 
-		let inst = new InstantiationService(new ServiceCollection([IWorkbenchEditorService, editorService]));
+		services.set(IEventService, eventService);
+		services.set(IWorkspaceContextService, contextService);
+		services.set(IWorkbenchEditorService, editorService);
+		let inst = new InstantiationService(services);
 
 		let model = new EditorHistoryModel(editorService, inst, contextService);
 
@@ -201,14 +190,19 @@ suite('Workbench QuickOpen', () => {
 		prefixAction.run();
 	});
 
-	test('QuickOpenController adds to history on editor input change and removes on dispose', () => {
-		let editorService = new TestEditorService();
+	test('QuickOpenController adds to history on editor input change and can handle dispose', () => {
+		let services = new ServiceCollection();
 
-		let eventService = new TestEventService();
 		let storageService = new TestStorageService();
+		let eventService = new TestEventService();
+		let editorService = new TestEditorService();
 		let contextService = new TestContextService();
 
-		let inst = new InstantiationService(new ServiceCollection([IWorkbenchEditorService, editorService]));
+		services.set(IEventService, eventService);
+		services.set(IWorkspaceContextService, contextService);
+		services.set(IWorkbenchEditorService, editorService);
+
+		let inst = new InstantiationService(services);
 
 		let controller = new QuickOpenController(
 			eventService,
@@ -219,21 +213,24 @@ suite('Workbench QuickOpen', () => {
 			null,
 			contextService,
 			new MockKeybindingService(),
-			null
+			inst
 		);
 
 		controller.create();
 
 		assert.equal(0, controller.getEditorHistoryModel().getEntries().length);
 
-		let cinput1 = <EditorInput>inst.createInstance(fileInputCtor, toResource('Hello World'), 'text/plain', void 0);
-		let event = new EditorEvent(null, '', cinput1, null, Position.LEFT);
-		eventService.emit(EventType.EDITOR_INPUT_CHANGING, event);
+		let cinput1 = <EditorInput>inst.createInstance(fileInputCtor, toResource('Hello World'), 'text/plain', null);
+		editorService.activeEditorInput = cinput1;
+
+		editorService.fireChange();
 
 		assert.equal(1, controller.getEditorHistoryModel().getEntries().length);
 
 		cinput1.dispose();
 
-		assert.equal(0, controller.getEditorHistoryModel().getEntries().length);
+		assert.equal(1, controller.getEditorHistoryModel().getEntries().length);
+
+		editorService.activeEditorInput = void 0;
 	});
 });

@@ -5,9 +5,10 @@
 'use strict';
 
 import * as editorCommon from 'vs/editor/common/editorCommon';
-import {IViewContext} from 'vs/editor/browser/editorBrowser';
 import {ViewPart} from 'vs/editor/browser/view/viewPart';
 import {FastDomNode, createFastDomNode} from 'vs/base/browser/styleMutator';
+import {ViewContext} from 'vs/editor/common/view/viewContext';
+import {ViewLinesViewportData} from 'vs/editor/common/viewLayout/viewLinesViewportData';
 
 export interface IVisibleLineData {
 	getDomNode(): HTMLElement;
@@ -50,7 +51,7 @@ export abstract class ViewLayer extends ViewPart {
 	private _scrollDomNode: HTMLElement;
 	private _scrollDomNodeIsAbove: boolean;
 
-	constructor(context:IViewContext) {
+	constructor(context:ViewContext) {
 		super(context);
 
 		this.domNode = this._createDomNode();
@@ -85,12 +86,12 @@ export abstract class ViewLayer extends ViewPart {
 		return true;
 	}
 
-	public onLayoutChanged(layoutInfo:editorCommon.IEditorLayoutInfo): boolean {
+	public onLayoutChanged(layoutInfo:editorCommon.EditorLayoutInfo): boolean {
 		return true;
 	}
 
 	public onScrollChanged(e:editorCommon.IScrollEvent): boolean {
-		return e.vertical;
+		return e.scrollTopChanged;
 	}
 
 	public onZonesChanged(): boolean {
@@ -217,6 +218,10 @@ export abstract class ViewLayer extends ViewPart {
 	}
 
 	public onModelTokensChanged(e:editorCommon.IViewTokensChangedEvent): boolean {
+		if (this._lines.length === 0) {
+			return false;
+		}
+
 		var changedFromIndex = e.fromLineNumber - this._rendLineNumberStart;
 		var changedToIndex = e.toLineNumber - this._rendLineNumberStart;
 
@@ -239,7 +244,7 @@ export abstract class ViewLayer extends ViewPart {
 
 
 	// ---- end view event handlers
-	public _renderLines(linesViewportData:editorCommon.ViewLinesViewportData): void {
+	public _renderLines(linesViewportData:ViewLinesViewportData): void {
 
 		var ctx: IRendererContext = {
 			domNode: this.domNode.domNode,

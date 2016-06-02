@@ -9,7 +9,6 @@ import platform = require('vs/base/common/platform');
 import paths = require('vs/base/common/paths');
 import uri from 'vs/base/common/uri';
 import {Identifiers} from 'vs/workbench/common/constants';
-import {EventType, EditorEvent} from 'vs/workbench/common/events';
 import workbenchEditorCommon = require('vs/workbench/common/editor');
 import {IViewletService} from 'vs/workbench/services/viewlet/common/viewletService';
 import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
@@ -26,6 +25,7 @@ export interface IWindowConfiguration {
 	window: {
 		openFilesInNewWindow: boolean;
 		reopenFolders: string;
+		restoreFullscreen: boolean;
 		zoomLevel: number;
 	};
 }
@@ -52,8 +52,8 @@ export class ElectronWindow {
 
 		// React to editor input changes (Mac only)
 		if (platform.platform === platform.Platform.Mac) {
-			this.eventService.addListener(EventType.EDITOR_INPUT_CHANGED, (e: EditorEvent) => {
-				let fileInput = workbenchEditorCommon.asFileEditorInput(e.editorInput, true);
+			this.editorService.onEditorsChanged(() => {
+				let fileInput = workbenchEditorCommon.asFileEditorInput(this.editorService.getActiveEditorInput(), true);
 				let representedFilename = '';
 				if (fileInput) {
 					representedFilename = fileInput.getResource().fsPath;
@@ -68,7 +68,7 @@ export class ElectronWindow {
 			e.preventDefault();
 		});
 
-		// Let a dropped file open inside Monaco (only if dropped over editor area)
+		// Let a dropped file open inside Code (only if dropped over editor area)
 		window.document.body.addEventListener('drop', (e: DragEvent) => {
 			e.preventDefault();
 
@@ -122,7 +122,7 @@ export class ElectronWindow {
 		});
 
 		// Handle window.open() calls
-		(<any>window).open = function(url: string, target: string, features: string, replace: boolean) {
+		(<any>window).open = function (url: string, target: string, features: string, replace: boolean) {
 			shell.openExternal(url);
 
 			return null;
@@ -166,7 +166,7 @@ export class ElectronWindow {
 			return dialog.showSaveDialog(this.win, options, callback);
 		}
 
-		return dialog.showSaveDialog(this.win, options); // https://github.com/atom/electron/issues/4936
+		return dialog.showSaveDialog(this.win, options); // https://github.com/electron/electron/issues/4936
 	}
 
 	public setFullScreen(fullscreen: boolean): void {

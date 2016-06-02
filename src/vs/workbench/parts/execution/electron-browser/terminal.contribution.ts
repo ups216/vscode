@@ -18,32 +18,28 @@ import {IWorkspaceContextService} from 'vs/workbench/services/workspace/common/c
 import {ITerminalService} from 'vs/workbench/parts/execution/common/execution';
 import {SyncActionDescriptor} from 'vs/platform/actions/common/actions';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
+import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
+import {asFileEditorInput} from 'vs/workbench/common/editor';
 import {KeyMod, KeyCode} from 'vs/base/common/keyCodes';
 import {Extensions, IConfigurationRegistry} from 'vs/platform/configuration/common/configurationRegistry';
-import {DEFAULT_WINDOWS_TERM, DEFAULT_LINUX_TERM} from 'vs/workbench/parts/execution/electron-browser/terminal';
+import {DEFAULT_TERMINAL_WINDOWS, DEFAULT_TERMINAL_LINUX} from 'vs/workbench/parts/execution/electron-browser/terminal';
 
 let configurationRegistry = <IConfigurationRegistry>Registry.as(Extensions.Configuration);
 configurationRegistry.registerConfiguration({
-	'id': 'terminal',
+	'id': 'externalTerminal',
 	'order': 100,
-	'title': nls.localize('terminalConfigurationTitle', "Terminal configuration"),
+	'title': nls.localize('terminalConfigurationTitle', "External terminal configuration"),
 	'type': 'object',
 	'properties': {
-		'terminal.external': {
-			'description': nls.localize('terminal.external', "External terminal settings."),
-			'type': 'object',
-			'properties': {
-				'windowsExec': {
-					'type': 'string',
-					'description': nls.localize('terminal.external.windowsExec', "Customizes which terminal to run on Windows."),
-					'default': DEFAULT_WINDOWS_TERM
-				},
-				'linuxExec': {
-					'type': 'string',
-					'description': nls.localize('terminal.external.linuxExec', "Customizes which terminal to on Linux."),
-					'default': DEFAULT_LINUX_TERM
-				}
-			}
+		'terminal.external.windowsExec': {
+			'type': 'string',
+			'description': nls.localize('terminal.external.windowsExec', "Customizes which terminal to run on Windows."),
+			'default': DEFAULT_TERMINAL_WINDOWS
+		},
+		'terminal.external.linuxExec': {
+			'type': 'string',
+			'description': nls.localize('terminal.external.linuxExec', "Customizes which terminal to run on Linux."),
+			'default': DEFAULT_TERMINAL_LINUX
 		}
 	}
 });
@@ -62,6 +58,7 @@ export class OpenConsoleAction extends Action {
 		id: string,
 		label: string,
 		@ITerminalService private terminalService: ITerminalService,
+		@IWorkbenchEditorService private editorService: IWorkbenchEditorService,
 		@IWorkspaceContextService private contextService: IWorkspaceContextService
 	) {
 		super(id, label);
@@ -75,14 +72,22 @@ export class OpenConsoleAction extends Action {
 	}
 
 	public run(event?: any): TPromise<any> {
-		let workspace = this.contextService.getWorkspace();
-		let path = this.resource ? this.resource.fsPath : (workspace && workspace.resource.fsPath);
+		let pathToOpen: string;
 
-		if (!path) {
-			return TPromise.as(null);
+		// Try workspace path first
+		let workspace = this.contextService.getWorkspace();
+		pathToOpen = this.resource ? this.resource.fsPath : (workspace && workspace.resource.fsPath);
+
+		// Otherwise check if we have an active file open
+		if (!pathToOpen) {
+			const file = asFileEditorInput(this.editorService.getActiveEditorInput(), true);
+			if (file) {
+				pathToOpen = paths.dirname(file.getResource().fsPath); // take parent folder of file
+			}
 		}
 
-		this.terminalService.openTerminal(path);
+		this.terminalService.openTerminal(pathToOpen);
+
 		return TPromise.as(null);
 	}
 }

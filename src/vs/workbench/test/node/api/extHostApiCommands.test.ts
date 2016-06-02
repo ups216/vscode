@@ -80,7 +80,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 			isDirty: false,
 			versionId: model.getVersionId(),
 			modeId: model.getModeId(),
-			url: model.getAssociatedResource(),
+			url: model.uri,
 			value: {
 				EOL: model.getEOL(),
 				lines: model.getValue().split(model.getEOL()),
@@ -89,6 +89,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 				options: {
 					tabSize: 4,
 					insertSpaces: true,
+					trimAutoWhitespace: true,
 					defaultEOL: EditorCommon.DefaultEndOfLine.LF
 				}
 			},
@@ -190,7 +191,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 		// });
 	});
 
-	test('Definition, back and forth', function(done) {
+	test('Definition, back and forth', function() {
 
 		disposables.push(extHost.registerDefinitionProvider(defaultSelector, <vscode.DefinitionProvider>{
 			provideDefinition(doc: any): any {
@@ -207,12 +208,38 @@ suite('ExtHostLanguageFeatureCommands', function() {
 			}
 		}));
 
-		threadService.sync().then(() => {
-			commands.executeCommand<vscode.Location[]>('vscode.executeDefinitionProvider', model.getAssociatedResource(), new types.Position(0, 0)).then(values => {
+		return threadService.sync().then(() => {
+			return commands.executeCommand<vscode.Location[]>('vscode.executeDefinitionProvider', model.uri, new types.Position(0, 0)).then(values => {
 				assert.equal(values.length, 4);
-				done();
-			}, done);
-		}, done);
+				for (let v of values) {
+					assert.ok(v.uri instanceof URI);
+					assert.ok(v.range instanceof types.Range);
+				}
+			});
+		});
+	});
+
+	// --- references
+
+	test('reference search, back and forth', function () {
+
+		disposables.push(extHost.registerReferenceProvider(defaultSelector, <vscode.ReferenceProvider>{
+			provideReferences(doc: any) {
+				return [
+					new types.Location(URI.parse('some:uri/path'), new types.Range(0, 1, 0, 5))
+				];
+			}
+		}));
+
+		return commands.executeCommand<vscode.Location[]>('vscode.executeReferenceProvider', model.uri, new types.Position(0, 0)).then(values => {
+			assert.equal(values.length, 1);
+			let [first] = values;
+			assert.equal(first.uri.toString(), 'some:uri/path');
+			assert.equal(first.range.start.line, 0);
+			assert.equal(first.range.start.character, 1);
+			assert.equal(first.range.end.line, 0);
+			assert.equal(first.range.end.character, 5);
+		});
 	});
 
 	// --- outline
@@ -228,7 +255,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 		}));
 
 		threadService.sync().then(() => {
-			commands.executeCommand<vscode.SymbolInformation[]>('vscode.executeDocumentSymbolProvider', model.getAssociatedResource()).then(values => {
+			commands.executeCommand<vscode.SymbolInformation[]>('vscode.executeDocumentSymbolProvider', model.uri).then(values => {
 				assert.equal(values.length, 2);
 				let [first, second] = values;
 				assert.equal(first.name, 'testing2');
@@ -255,7 +282,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 		}, []));
 
 		threadService.sync().then(() => {
-			commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', model.getAssociatedResource(), new types.Position(0, 4)).then(list => {
+			commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', model.uri, new types.Position(0, 4)).then(list => {
 				try {
 					assert.ok(list instanceof types.CompletionList);
 					let values = list.items;
@@ -307,7 +334,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 		}, []));
 
 		threadService.sync().then(() => {
-			return commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', model.getAssociatedResource(), new types.Position(0, 4)).then(list => {
+			return commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', model.uri, new types.Position(0, 4)).then(list => {
 				assert.ok(list instanceof types.CompletionList);
 				assert.equal(list.isIncomplete, true);
 				done();
@@ -325,7 +352,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 		}));
 
 		return threadService.sync().then(() => {
-			return commands.executeCommand<vscode.Command[]>('vscode.executeCodeActionProvider', model.getAssociatedResource(), new types.Range(0, 0, 1, 1)).then(value => {
+			return commands.executeCommand<vscode.Command[]>('vscode.executeCodeActionProvider', model.uri, new types.Range(0, 0, 1, 1)).then(value => {
 				assert.equal(value.length, 1);
 				let [first] = value;
 				assert.equal(first.title, 'Title');
@@ -352,7 +379,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 		}));
 
 		return threadService.sync().then(() => {
-			return commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', model.getAssociatedResource()).then(value => {
+			return commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', model.uri).then(value => {
 				assert.equal(value.length, 1);
 				let [first] = value;
 

@@ -8,18 +8,16 @@ import errors = require('vs/base/common/errors');
 import platform = require('vs/base/common/platform');
 import nls = require('vs/nls');
 import {EventType} from 'vs/base/common/events';
-import {IEditorSelection} from 'vs/editor/common/editorCommon';
 import {IEditor as IBaseEditor} from 'vs/platform/editor/common/editor';
 import {TextEditorOptions, EditorInput} from 'vs/workbench/common/editor';
 import {BaseTextEditor} from 'vs/workbench/browser/parts/editor/textEditor';
-import {EditorEvent, TextEditorSelectionEvent, EventType as WorkbenchEventType, EditorInputEvent} from 'vs/workbench/common/events';
 import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
-import {IQuickOpenService} from 'vs/workbench/services/quickopen/common/quickOpenService';
 import {IHistoryService} from 'vs/workbench/services/history/common/history';
 import {Selection} from 'vs/editor/common/core/selection';
 import {Position, IEditorInput} from 'vs/platform/editor/common/editor';
 import {IEventService} from 'vs/platform/event/common/event';
 import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
+import {IDisposable, dispose} from 'vs/base/common/lifecycle';
 
 /**
  * Stores the selection & view state of an editor and allows to compare it to other selection states.
@@ -28,15 +26,14 @@ export class EditorState {
 
 	private static EDITOR_SELECTION_THRESHOLD = 5; // number of lines to move in editor to justify for new state
 
-	constructor(private _editorInput: IEditorInput, private _selection: IEditorSelection) {
-		//
+	constructor(private _editorInput: IEditorInput, private _selection: Selection) {
 	}
 
 	public get editorInput(): IEditorInput {
 		return this._editorInput;
 	}
 
-	public get selection(): IEditorSelection {
+	public get selection(): Selection {
 		return this._selection;
 	}
 
@@ -68,7 +65,8 @@ interface IInputWithPath {
 }
 
 export abstract class BaseHistoryService {
-	protected toUnbind: { (): void; }[];
+	protected toUnbind: IDisposable[];
+	private activeEditorListeners: IDisposable[];
 
 	constructor(
 		private eventService: IEventService,
@@ -76,57 +74,45 @@ export abstract class BaseHistoryService {
 		protected contextService: IWorkspaceContextService
 	) {
 		this.toUnbind = [];
+		this.activeEditorListeners = [];
 
 		// Window Title
 		window.document.title = this.getWindowTitle(null);
 
 		// Editor Input Changes
-		this.toUnbind.push(this.eventService.addListener(WorkbenchEventType.EDITOR_INPUT_CHANGED, (e: EditorEvent) => this.onEditorInputChanged(e)));
-
-		// Editor Input State Changes
-		this.toUnbind.push(this.eventService.addListener(WorkbenchEventType.EDITOR_INPUT_STATE_CHANGED, (e: EditorInputEvent) => this.onEditorInputStateChanged(e.editorInput)));
-
-		// Text Editor Selection Changes
-		this.toUnbind.push(this.eventService.addListener(WorkbenchEventType.TEXT_EDITOR_SELECTION_CHANGED, (event: TextEditorSelectionEvent) => this.onTextEditorSelectionChanged(event)));
+		this.toUnbind.push(this.editorService.onEditorsChanged(() => this.onEditorsChanged()));
 	}
 
-	private onEditorInputStateChanged(input: IEditorInput): void {
+	private onEditorsChanged(): void {
 
-		// If an active editor is set, but is different from the one from the event, prevent update because the editor is not active.
+		// Dispose old listeners
+		dispose(this.activeEditorListeners);
+		this.activeEditorListeners = [];
+
 		let activeEditor = this.editorService.getActiveEditor();
-		if (activeEditor && !input.matches(activeEditor.input)) {
-			return;
+		let activeInput = activeEditor ? activeEditor.input : void 0;
+
+		// Propagate to history
+		this.onEditorEvent(activeEditor);
+
+		// Apply listener for dirty changes
+		if (activeInput instanceof EditorInput) {
+			this.activeEditorListeners.push(activeInput.onDidChangeDirty(() => {
+				this.updateWindowTitle(activeInput); // Calculate New Window Title when dirty state changes
+			}));
 		}
 
-		// Calculate New Window Title
-		this.updateWindowTitle(input);
-	}
-
-	private onTextEditorSelectionChanged(event: TextEditorSelectionEvent): void {
-
-		// If an active editor is set, but is different from the one from the event, prevent update because the editor is not active.
-		let editor = event.editor;
-		let activeEditor = this.editorService.getActiveEditor();
-		if (activeEditor && editor && activeEditor !== editor) {
-			return;
+		// Apply listener for selection changes if this is a text editor
+		if (activeEditor instanceof BaseTextEditor) {
+			const control = activeEditor.getControl();
+			this.activeEditorListeners.push(control.onDidChangeCursorPosition(event => {
+				this.handleEditorSelectionChangeEvent(activeEditor);
+			}));
 		}
-
-		// Delegate to implementors
-		this.handleEditorSelectionChangeEvent(event.editor);
-	}
-
-	private onEditorInputChanged(event: EditorEvent): void {
-		this.onEditorEvent(event.editor);
 	}
 
 	private onEditorEvent(editor: IBaseEditor): void {
 		let input = editor ? editor.input : null;
-
-		// If an active editor is set, but is different from the one from the event, prevent update because the editor is not active.
-		let activeEditor = this.editorService.getActiveEditor();
-		if (activeEditor && editor && activeEditor !== editor) {
-			return;
-		}
 
 		// Calculate New Window Title
 		this.updateWindowTitle(input);
@@ -166,9 +152,8 @@ export abstract class BaseHistoryService {
 
 		let prefix = input && input.getName();
 		if (prefix && input) {
-			let status = (<EditorInput>input).getStatus();
-			if (status && status.decoration && !platform.isMacintosh /* Mac has its own decoration in window */) {
-				prefix = nls.localize('prefixDecoration', "{0} {1}", status.decoration, prefix);
+			if ((<EditorInput>input).isDirty() && !platform.isMacintosh /* Mac has its own decoration in window */) {
+				prefix = nls.localize('prefixDecoration', "\u25cf {0}", prefix);
 			}
 		}
 
@@ -220,9 +205,7 @@ export abstract class BaseHistoryService {
 	}
 
 	public dispose(): void {
-		while (this.toUnbind.length) {
-			this.toUnbind.pop()();
-		}
+		this.toUnbind = dispose(this.toUnbind);
 	}
 }
 
@@ -237,38 +220,20 @@ export class HistoryService extends BaseHistoryService implements IHistoryServic
 
 	private static MAX_HISTORY_ITEMS = 200;
 
-	private _stack: IStackEntry[];
+	private stack: IStackEntry[];
 	private index: number;
 	private blockEditorEvent: boolean;
 	private currentFileEditorState: EditorState;
-	private quickOpenService: IQuickOpenService;
 
 	constructor(
 		eventService: IEventService,
 		editorService: IWorkbenchEditorService,
-		contextService: IWorkspaceContextService,
-		quickOpenService: IQuickOpenService
+		contextService: IWorkspaceContextService
 	) {
 		super(eventService, editorService, contextService);
 
-		this.quickOpenService = quickOpenService;
-
 		this.index = -1;
-	}
-
-	private get stack(): IStackEntry[] {
-
-		// Seed our stack from the persisted editor history
-		if (!this._stack) {
-			this._stack = [];
-			let history = this.quickOpenService.getEditorHistory();
-
-			for (let i = history.length - 1; i >= 0; i--) {
-				this.addToStack(history[i]);
-			}
-		}
-
-		return this._stack;
+		this.stack = [];
 	}
 
 	public forward(): void {
@@ -283,6 +248,11 @@ export class HistoryService extends BaseHistoryService implements IHistoryServic
 			this.index--;
 			this.navigate();
 		}
+	}
+
+	public clear(): void {
+		this.index = -1;
+		this.stack.splice(0);
 	}
 
 	private navigate(): void {
@@ -364,6 +334,11 @@ export class HistoryService extends BaseHistoryService implements IHistoryServic
 			options: options
 		};
 
+		// If we are not at the end of history, we remove anything after
+		if (this.stack.length > this.index + 1) {
+			this.stack = this.stack.slice(0, this.index + 1);
+		}
+
 		// Replace at current position
 		if (replace) {
 			this.stack[this.index] = entry;
@@ -384,7 +359,7 @@ export class HistoryService extends BaseHistoryService implements IHistoryServic
 		}
 
 		// Take out on dispose
-		input.addOneTimeListener(EventType.DISPOSE, () => {
+		input.addOneTimeDisposableListener(EventType.DISPOSE, () => {
 			this.stack.forEach((e, i) => {
 				if (e.input.matches(input)) {
 					this.stack.splice(i, 1);

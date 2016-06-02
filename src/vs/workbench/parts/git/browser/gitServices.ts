@@ -14,7 +14,6 @@ import errors = require('vs/base/common/errors');
 import mime = require('vs/base/common/mime');
 import paths = require('vs/base/common/paths');
 import ee = require('vs/base/common/eventEmitter');
-import wbevents = require('vs/workbench/common/events');
 import WorkbenchEditorCommon = require('vs/workbench/common/editor');
 import git = require('vs/workbench/parts/git/common/git');
 import model = require('vs/workbench/parts/git/common/gitModel');
@@ -26,7 +25,7 @@ import async = require('vs/base/common/async');
 import severity from 'vs/base/common/severity';
 import {IOutputService} from 'vs/workbench/parts/output/common/output';
 import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
-import {IConfigurationService, ConfigurationServiceEventTypes} from 'vs/platform/configuration/common/configuration';
+import {IConfigurationService} from 'vs/platform/configuration/common/configuration';
 import {IEventService} from 'vs/platform/event/common/event';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
 import {IMessageService, CloseAction} from 'vs/platform/message/common/message';
@@ -189,10 +188,10 @@ class EditorInputCache
 					resource = URI.file(paths.join(model.getRepositoryRoot(), indexStatus.getRename()));
 				}
 
-				return this.editorService.inputToType({ resource });
+				return this.editorService.createInput({ resource });
 
 			case git.Status.BOTH_MODIFIED:
-				return this.editorService.inputToType({ resource });
+				return this.editorService.createInput({ resource });
 
 			default:
 				return winjs.TPromise.as(null);
@@ -216,7 +215,7 @@ class EditorInputCache
 	 */
 	private eventuallyDispose(editorInput: WorkbenchEditorCommon.EditorInput): void {
 		if (!this.maybeDispose(editorInput)) {
-			var listener = this.eventService.addListener2(wbevents.EventType.EDITOR_INPUT_CHANGED, () => {
+			var listener = this.editorService.onEditorsChanged(() => {
 				if (this.maybeDispose(editorInput)) {
 					listener.dispose();
 				}
@@ -276,7 +275,7 @@ export class AutoFetcher implements git.IAutoFetcher, lifecycle.IDisposable
 		this.timeout = AutoFetcher.MIN_TIMEOUT;
 
 		this.toDispose = [];
-		this.toDispose.push(this.configurationService.addListener2(ConfigurationServiceEventTypes.UPDATED, e => this.onConfiguration(e.config.git)));
+		this.toDispose.push(this.configurationService.onDidUpdateConfiguration(e => this.onConfiguration(e.config.git)));
 		this.onConfiguration(configurationService.getConfiguration<git.IGitConfiguration>('git'));
 	}
 
@@ -376,9 +375,8 @@ export class GitService extends ee.EventEmitter
 	implements
 		git.IGitService {
 
-	static ID = 'Monaco.IDE.UI.Services.GitService';
-
 	public serviceId = git.IGitService;
+
 	private eventService: IEventService;
 	private contextService: IWorkspaceContextService;
 	private messageService: IMessageService;
@@ -392,7 +390,6 @@ export class GitService extends ee.EventEmitter
 	private operations: git.IGitOperation[];
 	private model: git.IModel;
 	private inputCache: EditorInputCache;
-	private remoteListenerUnbind:ee.ListenerUnbind;
 	private toDispose: lifecycle.IDisposable[];
 	private needsRefresh: boolean;
 	private refreshDelayer: async.ThrottledDelayer<void>;
@@ -471,8 +468,8 @@ export class GitService extends ee.EventEmitter
 
 	private registerListeners():void {
 		this.toDispose.push(this.eventService.addListener2(FileEventType.FILE_CHANGES,(e) => this.onFileChanges(e)));
-		this.toDispose.push(this.eventService.addListener2(filesCommon.EventType.FILE_SAVED, (e) => this.onLocalFileChange(e)));
-		this.toDispose.push(this.eventService.addListener2(filesCommon.EventType.FILE_REVERTED, (e) => this.onLocalFileChange(e)));
+		this.toDispose.push(this.eventService.addListener2(filesCommon.EventType.FILE_SAVED, (e) => this.onTextFileChange(e)));
+		this.toDispose.push(this.eventService.addListener2(filesCommon.EventType.FILE_REVERTED, (e) => this.onTextFileChange(e)));
 		this.lifecycleService.onShutdown(this.dispose, this);
 	}
 
@@ -482,7 +479,7 @@ export class GitService extends ee.EventEmitter
 			return;
 		}
 
-		var onError = async.once<any, void>(e => {
+		var onError = async.once(e => {
 			if (!errors.isPromiseCanceledError(e)) {
 				this.messageService.show(severity.Error, e);
 			}
@@ -491,8 +488,8 @@ export class GitService extends ee.EventEmitter
 		this.refreshDelayer.trigger(() => this.status()).done(null, onError);
 	}
 
-	private onLocalFileChange(e:filesCommon.LocalFileChangeEvent): void {
-		var shouldTriggerStatus = e.gotUpdated() && paths.basename(e.getAfter().resource.fsPath) === '.gitignore';
+	private onTextFileChange(e:filesCommon.TextFileChangeEvent): void {
+		var shouldTriggerStatus = e.gotUpdated() && paths.basename(e.resource.fsPath) === '.gitignore';
 
 		if (!shouldTriggerStatus) {
 			return;
@@ -813,11 +810,6 @@ export class GitService extends ee.EventEmitter
 		if (this.model) {
 			this.model.dispose();
 			this.model = null;
-		}
-
-		if (this.remoteListenerUnbind) {
-			this.remoteListenerUnbind();
-			this.remoteListenerUnbind = null;
 		}
 
 		super.dispose();
